@@ -26,6 +26,10 @@ export const site = {
   // Comparison figure from the buildup research — re-verify before quoting
   // publicly if this ever needs to survive a fact-check.
   humanAnsweringServiceMonthly: 4000,
+
+  // Where the deployed backend lives, for webhook URLs (Vapi's server.url,
+  // etc). Update if the production domain changes.
+  deployedUrl: "https://ai-receptionist-eight-umber.vercel.app",
 } as const;
 
 // "Restoration, Roofing & Plumbing"
