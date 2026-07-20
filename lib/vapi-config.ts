@@ -58,7 +58,7 @@ export const restorationAssistant = {
         destinations: [
           {
             type: "number",
-            number: site.contactPhoneHref.replace("tel:", ""),
+            number: site.ownerCellE164,
             message:
               "Connecting you now — stay on the line.",
             description:

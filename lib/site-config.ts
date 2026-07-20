@@ -9,13 +9,19 @@ export const site = {
   // plumbing. Order here controls display order across the site.
   trades: ["Restoration", "Roofing", "Plumbing"] as const,
 
-  // TODO: replace before launch
-  demoPhoneDisplay: "(313) 555-0182",
-  demoPhoneHref: "tel:+13135550182",
+  // Live demo line (Telnyx number routed to the Vapi assistant).
+  // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
+  demoPhoneDisplay: "(918) 223-4411",
+  demoPhoneHref: "tel:+19182234411",
   contactEmail: "hello@trademarkweb.com",
   contactPhoneDisplay: "(313) 555-0100",
   contactPhoneHref: "tel:+13135550100",
   calendarUrl: "https://cal.com/trademarkweb/demo",
+
+  // PRIVATE — used server-side / in the Vapi agent only.
+  // Never render these anywhere on the public site.
+  ownerCellE164: "+12484023630", // emergency warm-transfer destination
+  ownerEmail: "spyroll134@gmail.com", // call notifications land here
 
   pricing: {
     monthly: 297,

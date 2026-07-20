@@ -39,7 +39,7 @@ async function notifyOwner(call: {
 
   await resend.emails.send({
     from: `${site.businessName} <onboarding@resend.dev>`,
-    to: [site.contactEmail],
+    to: [site.ownerEmail],
     subject,
     text: [
       call.emergency ? "EMERGENCY — warm-transferred live." : "Non-emergency call.",
