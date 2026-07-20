@@ -4,7 +4,7 @@ const features = [
   "Owner SMS with caller info + recording, in ~90 seconds",
   "Real calendar booking — no fake slots",
   "Emergency human hand-off, live, every time",
-  "Trade-native intake: standing water, category, insurance carrier, loss date",
+  "Trade-native intake for restoration, roofing & plumbing — not generic questions",
   "Call recordings + full transcripts",
   "One-tap kill switch — turn it off and calls ring through like before",
 ];

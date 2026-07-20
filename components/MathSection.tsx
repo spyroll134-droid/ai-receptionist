@@ -22,9 +22,10 @@ export default function MathSection() {
         </div>
       </div>
       <p className="mt-10 text-lg text-slate-600 max-w-2xl mx-auto text-balance">
-        One caught emergency call is worth $3,000–$10,000+ in restoration
-        work. One job pays for the entire year. Everything after that is
-        margin you were losing to voicemail.
+        One caught emergency call is worth thousands — a restoration job,
+        a storm-damage roof, an emergency plumbing call. One job pays for
+        the entire year. Everything after that is margin you were losing
+        to voicemail.
       </p>
     </section>
   );

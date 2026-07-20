@@ -7,7 +7,7 @@ const steps = [
   {
     n: "2",
     title: "The AI answers — disclosed, up front",
-    body: "It asks what actually matters on a restoration call: standing water, category, insurance carrier, loss date, service address.",
+    body: "It asks what actually matters for your trade: standing water and insurance carrier for restoration, storm date and roof age for roofing, active leak status for plumbing.",
   },
   {
     n: "3",

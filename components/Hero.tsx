@@ -1,4 +1,4 @@
-import { site } from "@/lib/site-config";
+import { site, tradesLabel } from "@/lib/site-config";
 
 export default function Hero() {
   return (
@@ -13,7 +13,7 @@ export default function Hero() {
       />
       <div className="relative mx-auto max-w-4xl px-6 py-24 sm:py-32 text-center">
         <p className="text-sm font-medium text-blue-300 uppercase tracking-wide">
-          Built for restoration companies
+          Built for {tradesLabel()} companies
         </p>
         <h1 className="mt-4 text-4xl sm:text-6xl font-semibold tracking-tight text-balance">
           Your team already answers most calls.{" "}
