@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Trademark Web — landing page
 
-## Getting Started
+Marketing site for the AI receptionist product. Next.js + Tailwind, deployed
+on Vercel, trial signups stored in Supabase.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Before it works end-to-end
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The trial signup form posts to `/api/trial-signup`, which needs a Supabase
+project:
 
-## Learn More
+1. Create a project at supabase.com.
+2. In the SQL editor, run `supabase/schema.sql` from this repo.
+3. Copy `.env.local.example` to `.env.local` and fill in `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY` (Settings > API in the Supabase dashboard).
+4. Set the same two variables in Vercel's project settings for production.
 
-To learn more about Next.js, take a look at the following resources:
+## Editing site content
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Business name, phone numbers, pricing, and links all live in one place:
+`lib/site-config.ts`. Update the placeholders there before launch — the demo
+phone number in particular is a placeholder until the Vapi agent is live.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploying
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Push to `main` — if the repo is connected to Vercel, it deploys
+automatically. Otherwise: `vercel --prod` from this directory (after
+`vercel login` and `vercel link`).
