@@ -14,6 +14,12 @@ export default function Footer() {
           <a href={site.contactPhoneHref} className="hover:text-slate-800">
             {site.contactPhoneDisplay}
           </a>
+          <a href="/privacy-policy" className="hover:text-slate-800">
+            Privacy Policy
+          </a>
+          <a href="/terms-of-service" className="hover:text-slate-800">
+            Terms of Service
+          </a>
         </div>
       </div>
     </footer>

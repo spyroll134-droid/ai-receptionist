@@ -114,6 +114,15 @@ export default function TrialForm() {
       <p className="text-xs text-slate-500 text-center">
         No card required. 7 days on your real line, cancel anytime.
       </p>
+      <p className="text-xs text-slate-500 text-center">
+        By submitting, you agree to receive calls and texts from us about
+        your trial setup. Msg & data rates may apply, reply STOP to opt
+        out. See our{" "}
+        <a href="/privacy-policy" className="underline hover:text-slate-700">
+          Privacy Policy
+        </a>
+        .
+      </p>
     </form>
   );
 }
