@@ -68,13 +68,25 @@ export const restorationAssistant = {
       },
     ],
   },
+  // Premium voice — this is most of the perceived quality gap vs the
+  // turnkey competitors (billed through Vapi at cost, no separate account).
   voice: {
-    provider: "playht",
-    voiceId: "jennifer",
+    provider: "11labs",
+    voiceId: "21m00Tcm4TlvDq8ikWAM", // Rachel — natural, professional
+  },
+  transcriber: {
+    provider: "deepgram",
+    model: "nova-3",
+  },
+  // Faster turn-taking: start responding sooner after the caller stops.
+  startSpeakingPlan: {
+    waitSeconds: 0.3,
   },
   // Keep latency down; premium voice tiers only if a client complains later.
-  backgroundDenoisingEnabled: true,
-  silenceTimeoutSeconds: 20,
+  // NOTE: backgroundDenoising stays OFF — Vapi's Krisp path triggers a
+  // mid-call media renegotiation that breaks audio over the Telnyx bridge.
+  backgroundDenoisingEnabled: false,
+  silenceTimeoutSeconds: 30,
   maxDurationSeconds: 480, // hard per-call ceiling — cap runaway cost/spend
   analysisPlan: {
     summaryPlan: {
