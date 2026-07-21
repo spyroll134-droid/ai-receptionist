@@ -116,8 +116,18 @@ async function notifyOwner(call: {
   </div>
 </div>`.trim();
 
+  // onboarding@resend.dev is Resend's shared sandbox sender — it ONLY delivers
+  // to the account owner's own address, so a client would never receive their
+  // lead alerts. Send from the verified domain; fall back to the sandbox only
+  // if the domain env var is somehow missing, so notifications degrade rather
+  // than vanish.
+  const domain = process.env.RESEND_EMAIL_DOMAIN;
+  const from = domain
+    ? `${site.businessName} <notifications@${domain}>`
+    : `${site.businessName} <onboarding@resend.dev>`;
+
   await resend.emails.send({
-    from: `${site.businessName} <onboarding@resend.dev>`,
+    from,
     to: [call.toEmail || site.ownerEmail],
     subject,
     text,

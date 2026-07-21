@@ -45,14 +45,12 @@ export const site = {
   // Where the deployed backend lives, for webhook URLs (Vapi's server.url,
   // the assistant-request resolver, password-reset links).
   //
-  // ⚠️ Do not point this at thebackupline.com until that domain actually
-  // resolves. buildAssistant() hands this to Vapi as the post-call webhook
-  // URL on EVERY call — if it 404s, calls complete but nothing is saved and
-  // no owner email is sent, silently.
-  //
-  // Flip to https://thebackupline.com once DNS is verified, then also PATCH
-  // the Vapi phone number's server.url (stored on Vapi's side, not here).
-  deployedUrl: "https://ai-receptionist-eight-umber.vercel.app",
+  // ⚠️ buildAssistant() hands this to Vapi as the post-call webhook URL on
+  // EVERY call. If it stops resolving, calls still connect and sound fine but
+  // nothing is saved and no owner email is sent — silently. Verify the domain
+  // serves 200 before changing this, and PATCH the Vapi phone number's
+  // server.url to match (that value lives on Vapi's side, not here).
+  deployedUrl: "https://thebackupline.com",
 } as const;
 
 // "Restoration, Roofing & Plumbing"
