@@ -23,17 +23,17 @@ export async function rateLimit(
     req.headers.get("x-real-ip") ||
     "local";
 
-  const since = new Date(Date.now() - opts.windowMinutes * 60_000).toISOString();
-
   try {
     const supabase = getSupabaseServerClient();
 
-    const { count, error } = await supabase
-      .from("rate_limits")
-      .select("*", { count: "exact", head: true })
-      .eq("bucket", opts.key)
-      .eq("identifier", ip)
-      .gte("created_at", since);
+    // One atomic round trip (supabase/ops.sql): insert the hit and count the
+    // window under an advisory lock. A separate count-then-insert here would
+    // race — N concurrent requests all see the pre-burst count and all pass.
+    const { data: used, error } = await supabase.rpc("rate_limit_hit", {
+      p_bucket: opts.key,
+      p_identifier: ip,
+      p_window_minutes: opts.windowMinutes,
+    });
 
     if (error) {
       // Fail OPEN. A rate limiter that blocks real signups when its own table
@@ -42,14 +42,11 @@ export async function rateLimit(
       return { ok: true, remaining: opts.max };
     }
 
-    const used = count ?? 0;
-    if (used >= opts.max) return { ok: false, remaining: 0 };
-
-    await supabase
-      .from("rate_limits")
-      .insert({ bucket: opts.key, identifier: ip });
-
-    return { ok: true, remaining: opts.max - used - 1 };
+    // `used` includes this request. Over-limit hits are still recorded, so a
+    // sustained abuser stays locked out rather than sliding back in.
+    const n = Number(used ?? 1);
+    if (n > opts.max) return { ok: false, remaining: 0 };
+    return { ok: true, remaining: opts.max - n };
   } catch (err) {
     console.error("rate limit error, allowing:", err);
     return { ok: true, remaining: opts.max };

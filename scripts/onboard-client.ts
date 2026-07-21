@@ -14,10 +14,16 @@
  * Does, in order:
  *   1. Points the Vapi phone number at /api/vapi/assistant-request and CLEARS
  *      its assistantId — that's what makes Vapi ask us per call which client
- *      owns the number, instead of using one hardcoded assistant.
- *   2. Creates the client row with its agent config.
- *   3. Creates the portal login and links it via client_users.
- *   4. Prints the carrier forwarding codes and the credentials to hand over.
+ *      owns the number, instead of using one hardcoded assistant. Also sets
+ *      server.secret so our endpoints can authenticate Vapi's requests.
+ *   2. Creates the portal auth user. BEFORE the client row: the auth user is
+ *      the step most likely to fail (duplicate email), and failing here
+ *      leaves no orphaned client row with a live number routed at it.
+ *   3. Creates the client row and links it via client_users, cleaning up on
+ *      failure so a partial run never leaves the database inconsistent.
+ *   4. Prints the carrier forwarding codes and a one-time password-setup
+ *      link to hand over (never a plaintext password — those live forever in
+ *      shell history and scrollback).
  *
  * Buy the number in Telnyx and import it to Vapi first — automating that is
  * not worth it at this volume. This script takes the resulting Vapi phone
@@ -53,13 +59,15 @@ if (!name || !email || !phoneNumberId || !transfer) {
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const VAPI_KEY = process.env.VAPI_API_KEY;
+const WEBHOOK_SECRET = process.env.VAPI_WEBHOOK_SECRET;
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ??
   "https://ai-receptionist-eight-umber.vercel.app";
 
-if (!SUPABASE_URL || !SERVICE_KEY || !VAPI_KEY) {
+if (!SUPABASE_URL || !SERVICE_KEY || !VAPI_KEY || !WEBHOOK_SECRET) {
   console.error(
-    "Missing env. Run: set -a && . ./.env.local && set +a && npx tsx ..."
+    "Missing env (need SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, VAPI_API_KEY, VAPI_WEBHOOK_SECRET).\n" +
+      "Run: set -a && . ./.env.local && set +a && npx tsx ..."
   );
   process.exit(1);
 }
@@ -82,7 +90,11 @@ async function main() {
       },
       body: JSON.stringify({
         assistantId: null,
-        server: { url: `${SITE_URL}/api/vapi/assistant-request` },
+        server: {
+          url: `${SITE_URL}/api/vapi/assistant-request`,
+          // Echoed back as x-vapi-secret; our endpoints reject without it.
+          secret: WEBHOOK_SECRET,
+        },
       }),
     }
   );
@@ -92,8 +104,26 @@ async function main() {
     process.exit(1);
   }
   const vapiNumber = (await vapiRes.json()) as { number?: string };
+  // If anything below fails, the number resolves to no client and the
+  // assistant-request route serves the demo assistant — degraded, not broken.
 
-  // ---- 2. Client row ------------------------------------------------------
+  // ---- 2. Portal auth user ------------------------------------------------
+  // BEFORE the client row: duplicate email is the likeliest failure in the
+  // whole script, and failing here leaves nothing behind to clean up. The
+  // password is random and never shown — the client sets their own via the
+  // one-time link printed at the end.
+  const { data: created, error: userErr } = await db.auth.admin.createUser({
+    email,
+    password: randomBytes(24).toString("base64url"),
+    email_confirm: true,
+  });
+  if (userErr) {
+    console.error("Auth user failed:", userErr.message);
+    console.error("Nothing was written — safe to re-run after fixing this.");
+    process.exit(1);
+  }
+
+  // ---- 3. Client row + link -----------------------------------------------
   const accessKey = randomBytes(12).toString("base64url");
   const { data: client, error: clientErr } = await db
     .from("clients")
@@ -112,19 +142,8 @@ async function main() {
     .single();
   if (clientErr) {
     console.error("Client insert failed:", clientErr.message);
-    process.exit(1);
-  }
-
-  // ---- 3. Portal login ----------------------------------------------------
-  const password = randomBytes(12).toString("base64url");
-  const { data: created, error: userErr } = await db.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
-  if (userErr) {
-    console.error("Auth user failed:", userErr.message);
-    console.error("Client row was created — delete it before retrying.");
+    await db.auth.admin.deleteUser(created.user.id); // undo step 2
+    console.error("Auth user rolled back — safe to re-run.");
     process.exit(1);
   }
 
@@ -137,8 +156,23 @@ async function main() {
     });
   if (linkErr) {
     console.error("Link failed:", linkErr.message);
+    await db.from("clients").delete().eq("id", client.id); // undo step 3
+    await db.auth.admin.deleteUser(created.user.id); // undo step 2
+    console.error("Client row and auth user rolled back — safe to re-run.");
     process.exit(1);
   }
+
+  // One-time recovery link instead of a password: a plaintext password in
+  // terminal output persists in shell history/scrollback and stays valid
+  // forever; this link expires, works once, and the client picks their own.
+  const { data: linkData, error: linkGenErr } = await db.auth.admin.generateLink({
+    type: "recovery",
+    email: email!, // guarded non-empty at the top of the script
+    options: { redirectTo: `${SITE_URL}/reset-password` },
+  });
+  const setupLink = linkGenErr
+    ? `(link generation failed: ${linkGenErr.message} — use "Forgot your password?" on ${SITE_URL}/login)`
+    : linkData.properties.action_link;
 
   // ---- 4. Handoff ---------------------------------------------------------
   const aiNumber = vapiNumber.number ?? "(see Vapi dashboard)";
@@ -150,11 +184,12 @@ async function main() {
   Transfers to     ${transfer}
   Trade            ${trade}${area ? `\n  Service area     ${area}` : ""}
 
-  PORTAL LOGIN — give these to the client
+  PORTAL LOGIN — send the client this one-time link
+  (expires; they set their own password there)
   ───────────────────────────────────────────────
-  ${SITE_URL}/login
   ${email}
-  ${password}
+  ${setupLink}
+  Sign in after: ${SITE_URL}/login
 
   SET NO-ANSWER FORWARDING ON THEIR PHONE
   ───────────────────────────────────────────────

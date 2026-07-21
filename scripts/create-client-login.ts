@@ -6,9 +6,10 @@
  * There is no public signup: onboarding is done-for-you (carrier forwarding,
  * test call, the $199 setup), so accounts are created here during that process.
  *
- * Creates the auth user with a generated password, creates the client row if
- * it doesn't exist, and links the two via client_users. Prints the password
- * once — hand it to the client and tell them to reset it.
+ * Creates the auth user, creates the client row if it doesn't exist, and
+ * links the two via client_users. Prints a one-time password-setup link —
+ * never a plaintext password, which would persist in shell history and
+ * scrollback and stay valid indefinitely.
  *
  * Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (service role is required
  * to create users and to write client_users, which RLS makes read-only).
@@ -35,19 +36,22 @@ if (!url || !serviceKey) {
 }
 
 const trade = tradeArg ?? "Restoration";
-// URL-safe, no ambiguous characters to misread over the phone.
-const password = randomBytes(12).toString("base64url");
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  "https://ai-receptionist-eight-umber.vercel.app";
 
 const db = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
 async function main() {
-  // 1. Auth user. email_confirm skips the verification email — we're handing
-  //    the password over directly during a setup call.
+  // 1. Auth user. The password is random and never shown anywhere — the
+  //    client sets their own via the one-time link printed at the end.
+  //    email_confirm skips the verification email since we provision this
+  //    live during the setup call.
   const { data: created, error: userErr } = await db.auth.admin.createUser({
     email,
-    password,
+    password: randomBytes(24).toString("base64url"),
     email_confirm: true,
   });
   if (userErr) {
@@ -93,13 +97,25 @@ async function main() {
     process.exit(1);
   }
 
+  // 4. One-time password-setup link — expires, works once, and the client
+  //    picks their own password. Nothing durable lands in scrollback.
+  const { data: linkData, error: linkGenErr } = await db.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo: `${SITE_URL}/reset-password` },
+  });
+  const setupLink = linkGenErr
+    ? `(link generation failed: ${linkGenErr.message} — use "Forgot your password?" on ${SITE_URL}/login)`
+    : linkData.properties.action_link;
+
   console.log("\n  Portal login created");
   console.log("  ─────────────────────────────────────────");
   console.log(`  Client    ${clientName} (${trade})`);
   console.log(`  Email     ${email}`);
-  console.log(`  Password  ${password}`);
   console.log("  ─────────────────────────────────────────");
-  console.log("  Give them this password and have them reset it.\n");
+  console.log("  Send them this one-time link to set their password:");
+  console.log(`  ${setupLink}`);
+  console.log(`  Then they sign in at ${SITE_URL}/login\n`);
 }
 
 main().catch((e) => {

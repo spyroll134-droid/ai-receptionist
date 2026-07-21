@@ -38,6 +38,16 @@ export const site = {
     trialDays: 7,
   },
 
+  // Default average job value per trade, for the portal's "revenue protected"
+  // tile. A client's avg_ticket_dollars column overrides this when set —
+  // these only apply when that column is null. Rough industry figures;
+  // adjust freely, nothing downstream depends on the exact numbers.
+  avgTicketByTrade: {
+    Restoration: 7500,
+    Roofing: 9000,
+    Plumbing: 750,
+  } as Record<string, number>,
+
   // Comparison figure from the buildup research — re-verify before quoting
   // publicly if this ever needs to survive a fact-check.
   humanAnsweringServiceMonthly: 4000,
@@ -52,6 +62,16 @@ export const site = {
   // server.url to match (that value lives on Vapi's side, not here).
   deployedUrl: "https://thebackupline.com",
 } as const;
+
+// Average ticket for a client: their own override if set, else their trade's
+// default, else Restoration's (the founding trade) for unrecognized trades.
+export function avgTicketFor(trade: string, override?: number | null) {
+  return (
+    override ??
+    site.avgTicketByTrade[trade] ??
+    site.avgTicketByTrade.Restoration
+  );
+}
 
 // "Restoration, Roofing & Plumbing"
 export function tradesLabel(list: readonly string[] = site.trades) {

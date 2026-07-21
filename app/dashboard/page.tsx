@@ -9,13 +9,15 @@ import {
   CallCard,
   type CallRow,
   isAfterHours,
+  isDeadAir,
   Shell,
   StatTile,
 } from "@/components/dash";
 
 // Internal ops dashboard (owner view): all clients, all calls, all trial
-// signups. Gated by DASHBOARD_KEY (?key=...). Client-facing views live at
-// /portal/<client access_key> and are scoped to one client each.
+// signups. Gated by requireAdmin() — a real Supabase auth session checked
+// against the admins table (supabase/ops.sql). Client-facing views live at
+// /portal behind their own sessions, scoped to one client each by RLS.
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,6 @@ type ClientRow = {
   id: string;
   name: string;
   trade: string;
-  access_key: string;
   created_at: string;
 };
 
@@ -87,14 +88,20 @@ export default async function Dashboard() {
   const clientRows = (clients ?? []) as ClientRow[];
   const clientName = new Map(clientRows.map((c) => [c.id, c.name]));
 
-  const emergencies = callRows.filter((c) => c.emergency).length;
-  const booked = callRows.filter((c) => c.booked).length;
-  const afterHours = callRows.filter((c) => isAfterHours(c.created_at)).length;
+  const connected = callRows.filter((c) => !isDeadAir(c));
+  const deadAir = callRows.length - connected.length;
+  const emergencies = connected.filter((c) => c.emergency).length;
+  const booked = connected.filter((c) => c.booked).length;
+  const afterHours = connected.filter((c) => isAfterHours(c.created_at)).length;
 
   return (
     <Shell title={`${site.businessName} — Operations`} subtitle="All clients · live from the database">
       <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatTile label="Calls answered" value={callRows.length} />
+        <StatTile
+          label="Calls answered"
+          value={connected.length}
+          sub={deadAir > 0 ? `+${deadAir} dead-air excluded` : undefined}
+        />
         <StatTile label="Emergencies" value={emergencies} accent="red" />
         <StatTile label="Jobs booked" value={booked} accent="green" />
         <StatTile label="After-hours saves" value={afterHours} />
@@ -102,7 +109,7 @@ export default async function Dashboard() {
       </section>
 
       <section className="mt-6">
-        <ActivityBars calls={callRows} nowMs={nowMs} />
+        <ActivityBars calls={connected} nowMs={nowMs} />
       </section>
 
       <section className="mt-10">
@@ -116,13 +123,10 @@ export default async function Dashboard() {
                   <span className="font-medium text-white">{c.name}</span>
                   <Badge tone="info">{c.trade}</Badge>
                 </div>
+                {/* No portal link: /portal/<access_key> was removed with the
+                    URL-key scheme — clients now sign in at /login and see
+                    only their own rows via RLS. */}
                 <div className="mt-2 text-sm text-content-tertiary">{n} calls logged</div>
-                <a
-                  href={`/portal/${c.access_key}`}
-                  className="mt-3 inline-block break-all text-xs font-medium text-[#7cb3f2] hover:text-white"
-                >
-                  Client portal → /portal/{c.access_key}
-                </a>
               </div>
             );
           })}

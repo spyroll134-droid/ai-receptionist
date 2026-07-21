@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Resend } from "resend";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { escapeHtml, prettyPhone, sendEmail } from "@/lib/notify";
+import { verifyVapiSecret } from "@/lib/vapi-auth";
 import { site } from "@/lib/site-config";
 
 // Vapi posts every call-lifecycle event to this single URL, distinguished
@@ -8,31 +9,19 @@ import { site } from "@/lib/site-config";
 // point a call is finished and has a transcript + extracted structured
 // data available.
 
-function verifySecret(req: NextRequest) {
-  const expected = process.env.VAPI_WEBHOOK_SECRET;
-  if (!expected) return true; // not configured yet — allow during initial setup
-  return req.headers.get("x-vapi-secret") === expected;
-}
-
-function didTransferToOwner(message: Record<string, unknown>): boolean {
+// The assistant invoked the transferCall tool — the transfer was *attempted*.
+function didAttemptTransfer(message: Record<string, unknown>): boolean {
   const artifact = message.artifact as { messages?: unknown[] } | undefined;
   const msgs = artifact?.messages ?? [];
   return JSON.stringify(msgs).includes('"transferCall"');
 }
 
-/** (313) 555-0134 — E.164 is unreadable at a glance and not tappable. */
-function prettyPhone(raw?: string) {
-  if (!raw) return null;
-  const d = raw.replace(/\D/g, "");
-  const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
-  if (ten.length !== 10) return raw;
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
-  );
+// The transfer actually *connected*: Vapi ends the assistant's leg with
+// endedReason "assistant-forwarded-call" only when the bridge completed.
+// With the warm-transfer fallbackPlan, a missed transfer keeps the call
+// going and it ends with a normal reason instead.
+function didConnectTransfer(endedReason: string | undefined): boolean {
+  return endedReason === "assistant-forwarded-call";
 }
 
 /**
@@ -47,23 +36,21 @@ async function notifyOwner(call: {
   callbackNumber?: string;
   serviceAddress?: string;
   emergency?: boolean;
+  transferMissed?: boolean;
   summary?: string;
   toEmail?: string | null;
 }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn("RESEND_API_KEY not set — skipping owner notification");
-    return false;
-  }
-
-  const resend = new Resend(apiKey);
   const name = call.callerName || "Unknown caller";
   const phone = prettyPhone(call.callbackNumber);
   const reason = call.summary?.trim() || "No summary captured for this call.";
   const portalUrl = `${site.deployedUrl}/portal`;
 
   const subject = [
-    call.emergency ? "🚨 EMERGENCY" : "New lead",
+    call.transferMissed
+      ? "🚨 MISSED EMERGENCY TRANSFER — call back NOW"
+      : call.emergency
+        ? "🚨 EMERGENCY"
+        : "New lead",
     name,
     phone,
   ]
@@ -71,7 +58,11 @@ async function notifyOwner(call: {
     .join(" — ");
 
   const text = [
-    call.emergency ? "EMERGENCY — transferred to you live." : null,
+    call.transferMissed
+      ? "EMERGENCY — we tried to transfer them to you live and you didn't pick up. They were told you'd call right back."
+      : call.emergency
+        ? "EMERGENCY — transferred to you live."
+        : null,
     name,
     phone ?? "No callback number captured",
     "",
@@ -88,9 +79,11 @@ async function notifyOwner(call: {
   const html = `
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
   ${
-    call.emergency
-      ? `<div style="background:#fdecec;color:#b42318;font-weight:700;padding:10px 14px;border-radius:8px;margin-bottom:20px">🚨 EMERGENCY — transferred to you live</div>`
-      : ""
+    call.transferMissed
+      ? `<div style="background:#fdecec;color:#b42318;font-weight:700;padding:10px 14px;border-radius:8px;margin-bottom:20px">🚨 MISSED EMERGENCY TRANSFER — they were told you'd call right back. Call them now.</div>`
+      : call.emergency
+        ? `<div style="background:#fdecec;color:#b42318;font-weight:700;padding:10px 14px;border-radius:8px;margin-bottom:20px">🚨 EMERGENCY — transferred to you live</div>`
+        : ""
   }
   <div style="font-size:22px;font-weight:700;margin-bottom:4px">${escapeHtml(name)}</div>
   ${
@@ -116,28 +109,18 @@ async function notifyOwner(call: {
   </div>
 </div>`.trim();
 
-  // onboarding@resend.dev is Resend's shared sandbox sender — it ONLY delivers
-  // to the account owner's own address, so a client would never receive their
-  // lead alerts. Send from the verified domain; fall back to the sandbox only
-  // if the domain env var is somehow missing, so notifications degrade rather
-  // than vanish.
-  const domain = process.env.RESEND_EMAIL_DOMAIN;
-  const from = domain
-    ? `${site.businessName} <notifications@${domain}>`
-    : `${site.businessName} <onboarding@resend.dev>`;
-
-  await resend.emails.send({
-    from,
-    to: [call.toEmail || site.ownerEmail],
+  // Sender/API-key handling lives in lib/notify's sendEmail — one place owns
+  // the verified-domain / sandbox-fallback logic for all outbound mail.
+  return sendEmail({
+    to: call.toEmail || site.ownerEmail,
     subject,
     text,
     html,
   });
-  return true;
 }
 
 export async function POST(req: NextRequest) {
-  if (!verifySecret(req)) {
+  if (!verifyVapiSecret(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -168,6 +151,10 @@ export async function POST(req: NextRequest) {
   const recordingUrl = (message.artifact as { recordingUrl?: string } | undefined)
     ?.recordingUrl;
 
+  // Why the call ended (silence-timed-out, customer-ended-call, …). Stored
+  // so stat tiles can exclude pocket-dials and dead air from "Calls caught".
+  const endedReason = message.endedReason as string | undefined;
+
   // Vapi has moved this between the envelope and the call object across
   // versions — read both rather than silently storing null.
   const callCost =
@@ -178,8 +165,13 @@ export async function POST(req: NextRequest) {
   const callerName = structuredData.callerName as string | undefined;
   const callbackNumber = structuredData.callbackNumber as string | undefined;
   const serviceAddress = structuredData.serviceAddress as string | undefined;
+  const arrivalWindow = structuredData.arrivalWindow as string | undefined;
   const emergency = Boolean(structuredData.emergency);
-  const transferred = didTransferToOwner(message);
+  const transferAttempted = didAttemptTransfer(message);
+  const transferConnected = didConnectTransfer(endedReason);
+  // An emergency where the assistant tried to hand off and nobody picked up —
+  // the one situation the owner must hear about loudly.
+  const transferMissed = emergency && transferAttempted && !transferConnected;
 
   if (!call?.id) {
     console.error("end-of-call-report with no call id", message);
@@ -223,6 +215,7 @@ export async function POST(req: NextRequest) {
       callbackNumber,
       serviceAddress,
       emergency,
+      transferMissed,
       summary,
       toEmail: client?.owner_email,
     });
@@ -244,8 +237,15 @@ export async function POST(req: NextRequest) {
         loss_date: structuredData.lossDate as string | undefined,
         insurance_carrier: structuredData.insuranceCarrier as string | undefined,
         service_address: serviceAddress,
-        arrival_window: structuredData.arrivalWindow as string | undefined,
-        transferred_to_owner: transferred,
+        arrival_window: arrivalWindow,
+        // Booked = the agent committed to an arrival window, or a live
+        // emergency was warm-transferred to the owner — being handed the
+        // customer mid-crisis is a booked job in all but paperwork.
+        booked: Boolean(arrivalWindow?.trim()) || (emergency && transferConnected),
+        // Connected, not attempted: a transfer that rang out to voicemail
+        // must not show as "→ Transferred" in the portal or count as booked.
+        transferred_to_owner: transferConnected,
+        ended_reason: endedReason,
         transcript,
         summary,
         recording_url: recordingUrl,

@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
-import { site } from "@/lib/site-config";
+import { avgTicketFor, site } from "@/lib/site-config";
 import { getCurrentClient, getSupabaseSessionClient } from "@/lib/supabase-auth";
 import { requestNow } from "@/lib/now";
 import { signOut } from "@/app/actions/auth";
-import { ActivityBars, type CallRow, Shell, StatTile } from "@/components/dash";
+import { ActivityBars, type CallRow, isDeadAir, Shell, StatTile } from "@/components/dash";
 import CallTable from "@/components/CallTable";
 
 // Signed-in client portal. Replaces the /portal/<access_key> link scheme:
@@ -33,10 +33,13 @@ export default async function Portal() {
     .order("created_at", { ascending: false })
     .limit(200);
   const calls = (data ?? []) as CallRow[];
+  // Tiles count real conversations only; the table below still shows every
+  // call so the log stays a complete record.
+  const connected = calls.filter((c) => !isDeadAir(c));
 
-  const emergencies = calls.filter((c) => c.emergency).length;
-  const booked = calls.filter((c) => c.booked).length;
-  const avgTicket = client.avg_ticket_dollars ?? 5000;
+  const emergencies = connected.filter((c) => c.emergency).length;
+  const booked = connected.filter((c) => c.booked).length;
+  const avgTicket = avgTicketFor(client.trade, client.avg_ticket_dollars);
   const protectedRevenue = booked * avgTicket;
 
   return (
@@ -58,7 +61,7 @@ export default async function Portal() {
       <section className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile
           label="Calls caught"
-          value={calls.length}
+          value={connected.length}
           sub="that would have hit voicemail"
         />
         <StatTile label="Emergencies handled" value={emergencies} accent="red" />
@@ -72,7 +75,7 @@ export default async function Portal() {
       </section>
 
       <section className="mt-6">
-        <ActivityBars calls={calls} nowMs={nowMs} />
+        <ActivityBars calls={connected} nowMs={nowMs} />
       </section>
 
       <CallTable

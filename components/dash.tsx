@@ -26,7 +26,23 @@ export type CallRow = {
   recording_url: string | null;
   owner_notified_at: string | null;
   client_id: string | null;
+  ended_reason: string | null;
 };
+
+/**
+ * A call that never became a conversation: it silence-timed-out and no
+ * caller detail was ever captured. Pocket dials and dead air land here.
+ * Excluded from stat tiles (the numbers that justify the invoice) but still
+ * listed in the call log — hiding rows entirely would undermine trust in
+ * the log as a complete record.
+ */
+export function isDeadAir(c: CallRow) {
+  return (
+    c.ended_reason === "silence-timed-out" &&
+    !c.caller_name &&
+    !c.callback_number
+  );
+}
 
 export function fmt(ts: string) {
   return new Date(ts).toLocaleString("en-US", {

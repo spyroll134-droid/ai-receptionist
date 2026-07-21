@@ -131,6 +131,14 @@ export default function CallTable({
     });
   }, [calls, query, range, status, sortKey, sortDir, avgTicket, nowMs]);
 
+  // If a filter change excludes the expanded row, drop the expansion —
+  // otherwise the stale openId silently collapses the view AND pops the row
+  // back open if it's ever re-included. Adjusting state during render is
+  // React's sanctioned pattern for deriving state from props/other state.
+  if (openId && !filtered.some((c) => c.id === openId)) {
+    setOpenId(null);
+  }
+
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));

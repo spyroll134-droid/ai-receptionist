@@ -61,8 +61,12 @@ create table if not exists clients (
   owner_cell text,
   -- Which Vapi phone number feeds this client's calls (webhook matches on it)
   vapi_phone_number_id text,
-  -- Used for the ROI framing in the portal ("revenue protected")
-  avg_ticket_dollars integer default 5000
+  -- Per-client override for the ROI framing in the portal ("revenue
+  -- protected"). Null means "use the trade's default" from
+  -- site.avgTicketByTrade — so no column default here, or every client
+  -- would look deliberately customized and the trade defaults would
+  -- never apply.
+  avg_ticket_dollars integer
 );
 
 alter table clients enable row level security;

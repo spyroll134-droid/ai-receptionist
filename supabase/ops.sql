@@ -19,6 +19,35 @@ create table if not exists rate_limits (
 create index if not exists rate_limits_lookup_idx
   on rate_limits (bucket, identifier, created_at desc);
 
+-- Record a hit and return the caller's total in the window, atomically.
+-- A read-then-insert from the API route races: N concurrent requests all see
+-- the pre-burst count and all pass, making the limit unbounded under a
+-- scripted burst. The advisory lock serializes concurrent hits on the same
+-- (bucket, identifier) so each one counts the previous ones.
+create or replace function rate_limit_hit(
+  p_bucket text,
+  p_identifier text,
+  p_window_minutes int
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n bigint;
+begin
+  perform pg_advisory_xact_lock(hashtext(p_bucket || ':' || p_identifier));
+  insert into rate_limits (bucket, identifier) values (p_bucket, p_identifier);
+  select count(*) into n
+    from rate_limits
+   where bucket = p_bucket
+     and identifier = p_identifier
+     and created_at > now() - make_interval(mins => p_window_minutes);
+  return n;
+end;
+$$;
+
 alter table rate_limits enable row level security;
 -- No policies: only the service role (API routes) touches this. RLS on with
 -- zero policies means clients get nothing, which is what we want.

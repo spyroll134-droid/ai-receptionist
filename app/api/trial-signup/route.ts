@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { notifyTrialSignup } from "@/lib/notify";
 import { rateLimit } from "@/lib/rate-limit";
@@ -59,9 +60,17 @@ export async function POST(req: NextRequest) {
   // captured lead into an error the prospect sees. Speed-to-lead is the whole
   // pitch of this product — a signup sitting unseen in a table is the exact
   // failure we sell against.
-  notifyTrialSignup({ companyName, contactName, phone, email, trade }).catch(
-    (err) => console.error("Trial signup notification failed:", err)
-  );
+  //
+  // after() and not a floating promise: on Vercel the function can be frozen
+  // the moment the response returns, silently dropping an in-flight Resend
+  // call. after() keeps the instance alive until the callback settles.
+  after(async () => {
+    try {
+      await notifyTrialSignup({ companyName, contactName, phone, email, trade });
+    } catch (err) {
+      console.error("Trial signup notification failed:", err);
+    }
+  });
 
   return NextResponse.json({ ok: true });
 }

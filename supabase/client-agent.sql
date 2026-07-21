@@ -46,6 +46,11 @@ create index if not exists clients_vapi_phone_number_id_idx
 -- intake call, against $297/mo revenue.
 alter table calls add column if not exists cost_usd numeric(10, 4);
 
+-- Why the call ended, straight from Vapi's endedReason (silence-timed-out,
+-- customer-ended-call, assistant-ended-call, …). Lets the dashboards exclude
+-- pocket-dials and dead-air calls from client-facing stats.
+alter table calls add column if not exists ended_reason text;
+
 -- ---------------------------------------------------------------------------
 -- 3. Verify
 -- ---------------------------------------------------------------------------

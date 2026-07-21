@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { verifyVapiSecret } from "@/lib/vapi-auth";
 import { buildAssistant, DEMO_CLIENT, type AgentClient } from "@/lib/vapi-config";
 
 // Multi-tenant assistant resolution.
@@ -22,6 +23,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  // This endpoint returns each client's emergency transfer number and full
+  // system prompt — without auth, anyone who learns a phone-number id can
+  // pull a client's personal cell and the entire intake script. Vapi sends
+  // the number's server.secret as x-vapi-secret; require it.
+  if (!verifyVapiSecret(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   let body: { message?: Record<string, unknown> };
   try {
     body = await req.json();

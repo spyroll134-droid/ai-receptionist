@@ -100,6 +100,22 @@ export async function GET(req: NextRequest) {
 
   // 4. Is the Vapi number still pointed at us? A wrong server.url means calls
   //    connect and vanish.
+  //
+  // Parse the expected host OUTSIDE the try below: if deployedUrl is ever
+  // malformed, new URL() throwing inside the check would report a generic
+  // failure instead of the actual misconfiguration — the monitor built to
+  // catch a bad deployedUrl would be disabled by the bad deployedUrl.
+  let expectedHost: string;
+  try {
+    expectedHost = new URL(site.deployedUrl).host;
+  } catch {
+    expectedHost = site.deployedUrl.replace(/^https?:\/\//, "").split("/")[0];
+    checks.push({
+      name: "Site config",
+      ok: false,
+      detail: `site.deployedUrl is not a valid URL: ${site.deployedUrl}`,
+    });
+  }
   try {
     const key = process.env.VAPI_API_KEY;
     if (!key) {
@@ -115,7 +131,7 @@ export async function GET(req: NextRequest) {
       }[];
       const live = nums.filter((n) => n.number);
       const bad = live.filter(
-        (n) => !n.assistantId && !n.server?.url?.includes(new URL(site.deployedUrl).host)
+        (n) => !n.assistantId && !n.server?.url?.includes(expectedHost)
       );
       checks.push({
         name: "Vapi routing",

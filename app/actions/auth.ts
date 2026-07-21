@@ -52,8 +52,10 @@ export async function requestPasswordReset(
   const supabase = await getSupabaseSessionClient();
   // Supabase requires an absolute redirect URL. site-config is the single
   // source of truth for the deployed origin, so it updates with the domain.
+  // /reset-password consumes the ?code= and shows the new-password form —
+  // /login would silently swallow the link.
   await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${site.deployedUrl}/login`,
+    redirectTo: `${site.deployedUrl}/reset-password`,
   });
 
   // Always report success, whether or not the address exists — otherwise this
