@@ -1,3 +1,4 @@
+import { requestNow } from "@/lib/now";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { site } from "@/lib/site-config";
 import {
@@ -54,7 +55,7 @@ export default async function Dashboard({
   if (!expected || key !== expected) {
     return (
       <Shell title="Not authorized" subtitle="">
-        <p className="mt-16 text-center text-sm text-slate-500">
+        <p className="mt-16 text-center text-sm text-content-tertiary">
           Append ?key=YOUR_KEY to the URL.
         </p>
       </Shell>
@@ -62,6 +63,10 @@ export default async function Dashboard({
   }
 
   const supabase = getSupabaseServerClient();
+  // Per-request clock read. connection() marks this render as dynamic so
+  // the value is never captured at build time; the result is threaded into
+  // children so server and client agree and hydration stays clean.
+  const nowMs = await requestNow();
   const [{ data: calls }, { data: signups }, { data: clients }] = await Promise.all([
     supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(100),
     supabase.from("trial_signups").select("*").order("created_at", { ascending: false }).limit(50),
@@ -88,7 +93,7 @@ export default async function Dashboard({
       </section>
 
       <section className="mt-6">
-        <ActivityBars calls={callRows} />
+        <ActivityBars calls={callRows} nowMs={nowMs} />
       </section>
 
       <section className="mt-10">
@@ -97,12 +102,12 @@ export default async function Dashboard({
           {clientRows.map((c) => {
             const n = callRows.filter((r) => r.client_id === c.id).length;
             return (
-              <div key={c.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div key={c.id} className="rounded-2xl border border-line-default bg-surface-raised p-4">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-white">{c.name}</span>
                   <Badge tone="info">{c.trade}</Badge>
                 </div>
-                <div className="mt-2 text-sm text-slate-500">{n} calls logged</div>
+                <div className="mt-2 text-sm text-content-tertiary">{n} calls logged</div>
                 <a
                   href={`/portal/${c.access_key}`}
                   className="mt-3 inline-block break-all text-xs font-medium text-[#7cb3f2] hover:text-white"
@@ -118,7 +123,7 @@ export default async function Dashboard({
       <section className="mt-10">
         <h2 className="text-lg font-semibold text-white">Calls</h2>
         {callRows.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">
+          <p className="mt-4 text-sm text-content-tertiary">
             No calls yet — call the demo line and it lands here automatically.
           </p>
         ) : (
@@ -126,7 +131,7 @@ export default async function Dashboard({
             {callRows.map((c) => (
               <div key={c.id}>
                 {clientRows.length > 1 && (
-                  <div className="mb-1 pl-1 text-xs text-slate-600">
+                  <div className="mb-1 pl-1 text-xs text-content-secondary">
                     {clientName.get(c.client_id ?? "") ?? "Unassigned"}
                   </div>
                 )}
@@ -140,14 +145,14 @@ export default async function Dashboard({
       <section className="mt-10">
         <h2 className="text-lg font-semibold text-white">Trial signups</h2>
         {signupRows.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">
+          <p className="mt-4 text-sm text-content-tertiary">
             Website form submissions land here.
           </p>
         ) : (
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-line-default bg-surface-raised">
             <table className="w-full text-left text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
               <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-line-default text-xs uppercase tracking-wide text-content-tertiary">
                   <th className="px-4 py-3 font-medium">When</th>
                   <th className="px-4 py-3 font-medium">Company</th>
                   <th className="px-4 py-3 font-medium">Contact</th>
@@ -157,8 +162,8 @@ export default async function Dashboard({
               </thead>
               <tbody>
                 {signupRows.map((s) => (
-                  <tr key={s.id} className="border-b border-white/5 last:border-0">
-                    <td className="px-4 py-3 text-slate-500">{fmtShort(s.created_at)}</td>
+                  <tr key={s.id} className="border-b border-line-subtle last:border-0">
+                    <td className="px-4 py-3 text-content-tertiary">{fmtShort(s.created_at)}</td>
                     <td className="px-4 py-3 font-medium text-white">{s.company_name}</td>
                     <td className="px-4 py-3">{s.contact_name}</td>
                     <td className="px-4 py-3">{s.phone}</td>

@@ -1,14 +1,13 @@
+import { requestNow } from "@/lib/now";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { site } from "@/lib/site-config";
 import {
   ActivityBars,
-  Badge,
-  CallCard,
   type CallRow,
-  isAfterHours,
   Shell,
   StatTile,
 } from "@/components/dash";
+import CallTable from "@/components/CallTable";
 
 // Client portal: each client's private link (/portal/<access_key>) shows
 // ONLY their own calls. The access key is the whole credential — treat the
@@ -23,6 +22,10 @@ export default async function Portal({
 }) {
   const { key } = await params;
   const supabase = getSupabaseServerClient();
+  // Per-request clock read. connection() marks this render as dynamic so
+  // the value is never captured at build time; the result is threaded into
+  // children so server and client agree and hydration stays clean.
+  const nowMs = await requestNow();
 
   const { data: client } = await supabase
     .from("clients")
@@ -33,7 +36,7 @@ export default async function Portal({
   if (!client) {
     return (
       <Shell title="Portal" subtitle="">
-        <p className="mt-16 text-center text-slate-500">
+        <p className="mt-16 text-center text-content-tertiary">
           Invalid link. Contact {site.businessName} for your portal address.
         </p>
       </Shell>
@@ -50,7 +53,6 @@ export default async function Portal({
 
   const emergencies = calls.filter((c) => c.emergency).length;
   const booked = calls.filter((c) => c.booked).length;
-  const afterHours = calls.filter((c) => isAfterHours(c.created_at)).length;
   const protectedRevenue = booked * (client.avg_ticket_dollars ?? 5000);
 
   return (
@@ -71,29 +73,17 @@ export default async function Portal({
       </section>
 
       <section className="mt-6">
-        <ActivityBars calls={calls} />
+        <ActivityBars calls={calls} nowMs={nowMs} />
       </section>
 
-      <section className="mt-10">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold text-white">Your calls</h2>
-          {afterHours > 0 && <Badge tone="warning">☾ {afterHours} after-hours</Badge>}
-        </div>
-        {calls.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">
-            No calls yet — as soon as your AI catches one, it appears here
-            with the full transcript.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {calls.map((c) => (
-              <CallCard key={c.id} c={c} />
-            ))}
-          </div>
-        )}
-      </section>
+      <CallTable
+        calls={calls}
+        nowMs={nowMs}
+        avgTicket={client.avg_ticket_dollars ?? 5000}
+        clientName={client.name}
+      />
 
-      <footer className="mt-16 border-t border-white/5 pt-6 text-xs text-slate-600">
+      <footer className="mt-16 border-t border-line-subtle pt-6 text-xs text-content-secondary">
         Powered by {site.businessName} · questions? {site.contactEmail}
       </footer>
     </Shell>
