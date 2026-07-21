@@ -18,6 +18,15 @@ export default function Nav() {
           <Link href="#faq" className="hover:text-slate-900">
             FAQ
           </Link>
+          {/* /portal, not /login — proxy.ts sends signed-out users to the
+              login form and signed-in ones straight through, so one link
+              is right for both. */}
+          <Link
+            href="/portal"
+            className="font-medium text-slate-900 hover:text-slate-600"
+          >
+            Client login
+          </Link>
         </nav>
         <a
           href={site.demoPhoneHref}

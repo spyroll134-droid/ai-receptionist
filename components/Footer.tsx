@@ -14,6 +14,12 @@ export default function Footer() {
           <a href={site.contactPhoneHref} className="hover:text-slate-800">
             {site.contactPhoneDisplay}
           </a>
+          {/* Also here, not just in the nav: the nav's link set is hidden
+              below the sm breakpoint, so this is the only way a phone
+              visitor finds the portal. */}
+          <a href="/portal" className="hover:text-slate-800">
+            Client login
+          </a>
           <a href="/privacy-policy" className="hover:text-slate-800">
             Privacy Policy
           </a>
