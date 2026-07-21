@@ -22,8 +22,9 @@ export default function Hero() {
         </h1>
         <p className="mt-6 text-lg text-slate-300 max-w-2xl mx-auto text-balance">
           An AI receptionist that picks up after-hours, during storms, and
-          when your lines are already full — qualifies the emergency, books
-          a real arrival window, and texts you before the caller hangs up.
+          when your lines are already full — qualifies the emergency, commits
+          to a real arrival window, and emails you the full lead before the
+          caller hangs up.
         </p>
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
           <a

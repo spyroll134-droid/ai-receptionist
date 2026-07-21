@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: `${site.businessName} — AI Receptionist for ${tradesLabel()}`,
   description:
-    "Never miss another after-hours emergency call. AI answers what your team can't, books the job, and texts you before you hang up.",
+    "Never miss another after-hours emergency call. AI answers what your team can't, captures the job details, and emails you the full lead before the caller hangs up.",
 };
 
 export default function RootLayout({

@@ -1,11 +1,11 @@
 const features = [
   "24/7 after-hours + overflow answering",
-  "Missed-call text-back within 60 seconds",
-  "Owner SMS with caller info + recording, in ~90 seconds",
-  "Real calendar booking — no fake slots",
+  "Owner email with caller info, transcript & recording the moment the call ends",
+  "Commits to a real arrival window on the call — never a date-picker",
   "Emergency human hand-off, live, every time",
   "Trade-native intake for restoration, roofing & plumbing — not generic questions",
   "Call recordings + full transcripts",
+  "Searchable call history with CSV export — your data stays yours",
   "One-tap kill switch — turn it off and calls ring through like before",
 ];
 

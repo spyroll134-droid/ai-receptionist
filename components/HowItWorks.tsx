@@ -12,7 +12,7 @@ const steps = [
   {
     n: "3",
     title: "You get the job, not just a message",
-    body: "A real arrival window gets booked — never a date-picker — and you get a text with the caller's info before you've even seen the missed call.",
+    body: "The AI commits to a real arrival window — never a date-picker — and emails you the caller's details before you've even seen the missed call.",
   },
 ];
 
