@@ -18,10 +18,13 @@ export const site = {
   demoPhoneDisplay: "(918) 223-4411",
   demoPhoneHref: "tel:+19182234411",
   contactEmail: "hello@thebackupline.com",
-  // TODO: still a placeholder — swap for a real line before cold-calling, or
-  // remove it from the site rather than publish a number that doesn't ring.
-  contactPhoneDisplay: "(313) 555-0100",
-  contactPhoneHref: "tel:+13135550100",
+  // Same line as the demo, on purpose. (313) 555-0100 used to sit here and
+  // rang nowhere — a dead number on a page whose only job is proving you're
+  // real is worse than no number. Pointing contact at the AI line means it
+  // always answers AND demos the product to anyone who calls it.
+  // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
+  contactPhoneDisplay: "(918) 223-4411",
+  contactPhoneHref: "tel:+19182234411",
   calendarUrl: "https://cal.com/thebackupline/demo",
 
   // PRIVATE — used server-side / in the Vapi agent only.
