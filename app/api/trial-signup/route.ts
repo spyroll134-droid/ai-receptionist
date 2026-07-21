@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { notifyTrialSignup } from "@/lib/notify";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  // Public unauthenticated write — throttle before touching the database.
+  const limited = await rateLimit(req, { key: "trial-signup", max: 5, windowMinutes: 60 });
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: "Too many signups from this address. Try again shortly." },
+      { status: 429 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -9,11 +20,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const companyName = String(body.companyName ?? "").trim();
-  const contactName = String(body.contactName ?? "").trim();
-  const phone = String(body.phone ?? "").trim();
-  const email = String(body.email ?? "").trim();
-  const trade = String(body.trade ?? "").trim();
+  const companyName = String(body.companyName ?? "").trim().slice(0, 200);
+  const contactName = String(body.contactName ?? "").trim().slice(0, 200);
+  const phone = String(body.phone ?? "").trim().slice(0, 40);
+  const email = String(body.email ?? "").trim().slice(0, 200);
+  const trade = String(body.trade ?? "").trim().slice(0, 60);
 
   if (!companyName || !contactName || !phone) {
     return NextResponse.json(
@@ -43,6 +54,14 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+
+  // Alert AFTER the row is safely saved, and never let a mail failure turn a
+  // captured lead into an error the prospect sees. Speed-to-lead is the whole
+  // pitch of this product — a signup sitting unseen in a table is the exact
+  // failure we sell against.
+  notifyTrialSignup({ companyName, contactName, phone, email, trade }).catch(
+    (err) => console.error("Trial signup notification failed:", err)
+  );
 
   return NextResponse.json({ ok: true });
 }

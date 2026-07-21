@@ -70,3 +70,26 @@ export async function getCurrentClient() {
 
   return client ? { client, user } : null;
 }
+
+/**
+ * Is the current session an admin (ops dashboard)?
+ *
+ * Checked against the `admins` table rather than a shared secret, so access is
+ * revocable per-person and never travels in a URL. Reads through the user's own
+ * session, so RLS ("own admin row") applies.
+ */
+export async function requireAdmin(): Promise<boolean> {
+  const supabase = await getSupabaseSessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from("admins")
+    .select("auth_user_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  return Boolean(data);
+}

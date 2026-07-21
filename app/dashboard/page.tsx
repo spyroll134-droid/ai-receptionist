@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { requestNow } from "@/lib/now";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { requireAdmin } from "@/lib/supabase-auth";
 import { site } from "@/lib/site-config";
 import {
   ActivityBars,
@@ -45,18 +47,25 @@ function fmtShort(ts: string) {
   });
 }
 
-export default async function Dashboard({
-  searchParams,
-}: {
-  searchParams: Promise<{ key?: string }>;
-}) {
-  const { key } = await searchParams;
-  const expected = process.env.DASHBOARD_KEY;
-  if (!expected || key !== expected) {
+export default async function Dashboard() {
+  // Was gated by ?key=<secret> in the URL — the same weakness the client
+  // portals had: the credential lands in browser history, in anything you
+  // screenshot, and in Vercel's access logs in plaintext. Admins are now real
+  // auth users (supabase/ops.sql), checked against the admins table.
+  const isAdmin = await requireAdmin();
+  if (!isAdmin) {
     return (
       <Shell title="Not authorized" subtitle="">
         <p className="mt-16 text-center text-sm text-content-tertiary">
-          Append ?key=YOUR_KEY to the URL.
+          Sign in with an admin account to view this.
+        </p>
+        <p className="mt-3 text-center">
+          <Link
+            href="/login"
+            className="text-sm font-medium text-accent-text hover:text-content-primary"
+          >
+            Go to sign in →
+          </Link>
         </p>
       </Shell>
     );
