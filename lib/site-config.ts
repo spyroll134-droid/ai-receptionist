@@ -2,7 +2,11 @@
 // Update these and every page on the site updates with them.
 
 export const site = {
-  businessName: "Trademark Web",
+  // Brand matches the domain deliberately: prospects hear "thebackupline.com"
+  // on a cold call and land on a site that says the same thing back. If the
+  // business ever incorporates as Greetova LLC, that's paperwork only —
+  // customers should keep seeing one name.
+  businessName: "The Backup Line",
   tagline: "The AI receptionist that catches what your team drops.",
 
   // Build order per the locked plan: restoration first, then roofing, then
@@ -13,10 +17,12 @@ export const site = {
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
   demoPhoneDisplay: "(918) 223-4411",
   demoPhoneHref: "tel:+19182234411",
-  contactEmail: "hello@trademarkweb.com",
+  contactEmail: "hello@thebackupline.com",
+  // TODO: still a placeholder — swap for a real line before cold-calling, or
+  // remove it from the site rather than publish a number that doesn't ring.
   contactPhoneDisplay: "(313) 555-0100",
   contactPhoneHref: "tel:+13135550100",
-  calendarUrl: "https://cal.com/trademarkweb/demo",
+  calendarUrl: "https://cal.com/thebackupline/demo",
 
   // PRIVATE — used server-side / in the Vapi agent only.
   // Never render these anywhere on the public site.
@@ -34,7 +40,15 @@ export const site = {
   humanAnsweringServiceMonthly: 4000,
 
   // Where the deployed backend lives, for webhook URLs (Vapi's server.url,
-  // etc). Update if the production domain changes.
+  // the assistant-request resolver, password-reset links).
+  //
+  // ⚠️ Do not point this at thebackupline.com until that domain actually
+  // resolves. buildAssistant() hands this to Vapi as the post-call webhook
+  // URL on EVERY call — if it 404s, calls complete but nothing is saved and
+  // no owner email is sent, silently.
+  //
+  // Flip to https://thebackupline.com once DNS is verified, then also PATCH
+  // the Vapi phone number's server.url (stored on Vapi's side, not here).
   deployedUrl: "https://ai-receptionist-eight-umber.vercel.app",
 } as const;
 
