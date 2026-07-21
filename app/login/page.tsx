@@ -1,30 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { site } from "@/lib/site-config";
+import { signIn, requestPasswordReset, type AuthState } from "@/app/actions/auth";
 import { Button, Card, Field } from "@/components/ui";
 
-// Client sign-in. NOTE: still the interim access-code flow — the code is
-// exchanged for the portal URL client-side. Being replaced by Supabase Auth
-// (email + password) against the client_users table; see supabase/auth.sql.
-// Until that lands, treat the access code as a password.
+// Client sign-in. Email + password via Supabase Auth; the session lands in an
+// httpOnly cookie and proxy.ts keeps it fresh. Accounts are provisioned by
+// Trademark Web during setup (scripts/create-client-login.ts) — there is no
+// public signup, because onboarding includes carrier forwarding we do by hand.
 
 export default function Login() {
-  const router = useRouter();
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setError("Enter your access code.");
-      return;
-    }
-    router.push(`/portal/${encodeURIComponent(trimmed)}`);
-  }
+  const [state, formAction, pending] = useActionState<AuthState, FormData>(
+    signIn,
+    undefined
+  );
+  const [showReset, setShowReset] = useState(false);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-surface-base px-6 py-16 text-content-primary">
@@ -46,58 +38,125 @@ export default function Login() {
             {site.businessName}
           </Link>
           <h1 className="mt-8 text-2xl font-semibold text-content-primary">
-            Client sign in
+            {showReset ? "Reset your password" : "Client sign in"}
           </h1>
           <p className="mt-2 text-sm text-content-secondary">
-            Enter the access code we gave you at setup.
+            {showReset
+              ? "We'll email you a link to set a new password."
+              : "See every call your AI receptionist has caught."}
           </p>
         </div>
 
         <Card className="mt-8 p-6">
-          <form onSubmit={submit} noValidate>
-            <Field
-              label="Access code"
-              name="accessCode"
-              autoFocus
-              autoComplete="one-time-code"
-              spellCheck={false}
-              value={code}
-              placeholder="e.g. lrqKAu_PIJ0I-g"
-              className="font-mono"
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? "code-error" : undefined}
-              onChange={(e) => {
-                setCode(e.target.value);
-                setError("");
-              }}
-            />
+          {showReset ? (
+            <ResetForm onBack={() => setShowReset(false)} />
+          ) : (
+            <form action={formAction} className="space-y-4">
+              <Field
+                label="Email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                autoFocus
+                placeholder="you@yourcompany.com"
+              />
+              <Field
+                label="Password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+              />
 
-            {error && (
-              <p
-                id="code-error"
-                role="alert"
-                className="mt-2 text-sm text-critical-text"
+              {state?.error && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-critical-line bg-critical-surface px-3 py-2 text-sm text-critical-text"
+                >
+                  {state.error}
+                </p>
+              )}
+
+              <Button type="submit" size="lg" disabled={pending} className="w-full">
+                {pending ? "Signing in…" : "Sign in"}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => setShowReset(true)}
+                className="w-full text-center text-xs text-content-tertiary transition-colors hover:text-content-primary"
               >
-                {error}
-              </p>
-            )}
-
-            <Button type="submit" size="lg" className="mt-4 w-full">
-              View my dashboard
-            </Button>
-          </form>
-
-          <p className="mt-5 text-center text-xs text-content-tertiary">
-            Lost your code? Email{" "}
-            <a
-              href={`mailto:${site.contactEmail}`}
-              className="text-content-secondary underline transition-colors hover:text-content-primary"
-            >
-              {site.contactEmail}
-            </a>
-          </p>
+                Forgot your password?
+              </button>
+            </form>
+          )}
         </Card>
+
+        <p className="mt-6 text-center text-xs text-content-tertiary">
+          Don&apos;t have a login yet? Email{" "}
+          <a
+            href={`mailto:${site.contactEmail}`}
+            className="text-content-secondary underline transition-colors hover:text-content-primary"
+          >
+            {site.contactEmail}
+          </a>
+        </p>
       </div>
     </div>
+  );
+}
+
+function ResetForm({ onBack }: { onBack: () => void }) {
+  const [state, formAction, pending] = useActionState<AuthState, FormData>(
+    requestPasswordReset,
+    undefined
+  );
+  const [sent, setSent] = useState(false);
+
+  if (sent) {
+    return (
+      <div className="text-center">
+        <p className="text-sm text-content-primary">
+          If that email has an account, a reset link is on its way.
+        </p>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-4 text-sm font-medium text-accent-text hover:text-content-primary"
+        >
+          Back to sign in
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form action={formAction} onSubmit={() => setSent(true)} className="space-y-4">
+      <Field
+        label="Email"
+        name="email"
+        type="email"
+        autoComplete="email"
+        required
+        autoFocus
+        placeholder="you@yourcompany.com"
+      />
+      {state?.error && (
+        <p role="alert" className="text-sm text-critical-text">
+          {state.error}
+        </p>
+      )}
+      <Button type="submit" size="lg" disabled={pending} className="w-full">
+        {pending ? "Sending…" : "Send reset link"}
+      </Button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="w-full text-center text-xs text-content-tertiary transition-colors hover:text-content-primary"
+      >
+        Back to sign in
+      </button>
+    </form>
   );
 }

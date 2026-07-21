@@ -20,6 +20,28 @@ function didTransferToOwner(message: Record<string, unknown>): boolean {
   return JSON.stringify(msgs).includes('"transferCall"');
 }
 
+/** (313) 555-0134 — E.164 is unreadable at a glance and not tappable. */
+function prettyPhone(raw?: string) {
+  if (!raw) return null;
+  const d = raw.replace(/\D/g, "");
+  const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+  if (ten.length !== 10) return raw;
+  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
+/**
+ * The owner alert. Deliberately minimal: who called, the number to call back,
+ * and why. An owner reading this on a phone at 2am needs to act, not study —
+ * so the callback number is in the subject line (visible in the notification
+ * preview without opening) and is a tap-to-call link in the body. Everything
+ * else lives in the portal, one link away.
+ */
 async function notifyOwner(call: {
   callerName?: string;
   callbackNumber?: string;
@@ -33,23 +55,73 @@ async function notifyOwner(call: {
     console.warn("RESEND_API_KEY not set — skipping owner notification");
     return false;
   }
+
   const resend = new Resend(apiKey);
-  const subject = call.emergency
-    ? `EMERGENCY call caught — ${call.callerName ?? "unknown caller"}`
-    : `New call caught — ${call.callerName ?? "unknown caller"}`;
+  const name = call.callerName || "Unknown caller";
+  const phone = prettyPhone(call.callbackNumber);
+  const reason = call.summary?.trim() || "No summary captured for this call.";
+  const portalUrl = `${site.deployedUrl}/portal`;
+
+  const subject = [
+    call.emergency ? "🚨 EMERGENCY" : "New lead",
+    name,
+    phone,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+
+  const text = [
+    call.emergency ? "EMERGENCY — transferred to you live." : null,
+    name,
+    phone ?? "No callback number captured",
+    "",
+    "Why they called:",
+    reason,
+    call.serviceAddress ? `\nAddress: ${call.serviceAddress}` : null,
+    "",
+    `See the full call and transcript: ${portalUrl}`,
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  // Inline styles only — every email client strips <style> blocks.
+  const html = `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+  ${
+    call.emergency
+      ? `<div style="background:#fdecec;color:#b42318;font-weight:700;padding:10px 14px;border-radius:8px;margin-bottom:20px">🚨 EMERGENCY — transferred to you live</div>`
+      : ""
+  }
+  <div style="font-size:22px;font-weight:700;margin-bottom:4px">${escapeHtml(name)}</div>
+  ${
+    phone
+      ? `<a href="tel:${escapeHtml(call.callbackNumber ?? "")}" style="font-size:20px;color:#1d4ed8;text-decoration:none;font-weight:600">${escapeHtml(phone)}</a>`
+      : `<div style="color:#666">No callback number captured</div>`
+  }
+
+  <div style="margin-top:24px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#666">Why they called</div>
+  <div style="margin-top:6px;font-size:15px;line-height:1.55">${escapeHtml(reason)}</div>
+
+  ${
+    call.serviceAddress
+      ? `<div style="margin-top:18px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#666">Address</div>
+         <div style="margin-top:4px;font-size:15px">${escapeHtml(call.serviceAddress)}</div>`
+      : ""
+  }
+
+  <a href="${portalUrl}" style="display:inline-block;margin-top:28px;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:999px;font-weight:600;font-size:14px">See the full call &rarr;</a>
+
+  <div style="margin-top:28px;border-top:1px solid #eee;padding-top:14px;font-size:12px;color:#888">
+    Caught by your ${escapeHtml(site.businessName)} AI receptionist.
+  </div>
+</div>`.trim();
 
   await resend.emails.send({
     from: `${site.businessName} <onboarding@resend.dev>`,
     to: [call.toEmail || site.ownerEmail],
     subject,
-    text: [
-      call.emergency ? "EMERGENCY — warm-transferred live." : "Non-emergency call.",
-      `Caller: ${call.callerName ?? "unknown"}`,
-      `Callback: ${call.callbackNumber ?? "unknown"}`,
-      `Address: ${call.serviceAddress ?? "unknown"}`,
-      "",
-      call.summary ?? "",
-    ].join("\n"),
+    text,
+    html,
   });
   return true;
 }
