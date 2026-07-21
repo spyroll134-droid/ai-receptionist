@@ -1,5 +1,5 @@
 // Restoration intake agent — config as code, pushed to Vapi via
-// scripts/sync-vapi-assistant.mjs so the assistant is reproducible and
+// scripts/sync-vapi-assistant.ts so the assistant is reproducible and
 // diffable instead of hand-edited in a dashboard.
 //
 // Design constraints (from the build playbooks, learned the hard way):
@@ -11,10 +11,36 @@
 // - Real arrival windows, never a date-picker ask.
 // - Emergency intent -> native Vapi transferCall to the owner's cell, live.
 //   The AI never handles a crisis alone.
+//
+// MULTI-TENANCY: this is a TEMPLATE, not a per-client assistant. Client
+// specifics (greeting name, transfer number, service area) are injected at
+// call time by app/api/vapi/assistant-request/route.ts. Do not clone this
+// per client — one template means one place to improve the script.
 
 import { site } from "./site-config";
 
-const SYSTEM_PROMPT = `You are the automated answering assistant for a restoration company. You answer calls the company's own team didn't pick up — after-hours, during a storm surge, or when lines are full. You are not replacing their receptionist; you are catching what they missed.
+/** The subset of a `clients` row the agent needs. */
+export type AgentClient = {
+  name: string;
+  greeting_name?: string | null;
+  trade?: string | null;
+  service_area?: string | null;
+  emergency_transfer_number?: string | null;
+  agent_notes?: string | null;
+};
+
+/** Fallback used for the demo line and for any unrecognized number. */
+export const DEMO_CLIENT: AgentClient = {
+  name: site.businessName,
+  greeting_name: site.businessName,
+  trade: "Restoration",
+  emergency_transfer_number: site.ownerCellE164,
+};
+
+function buildSystemPrompt(client: AgentClient) {
+  const business = client.greeting_name || client.name;
+
+  return `You are the automated answering assistant for ${business}, a restoration company. You answer calls the company's own team didn't pick up — after-hours, during a storm surge, or when lines are full. You are not replacing their receptionist; you are catching what they missed.
 
 Disclosure: your very first sentence must tell the caller they've reached an automated assistant and that the call may be recorded. Never skip this, never bury it.
 
@@ -39,82 +65,102 @@ Ambiguity rule: if you are not sure whether something is an emergency, treat it 
 Booking: never ask a caller to pick a date. For an emergency, commit to an arrival window — "someone can be out within two to three hours" — and confirm the address and callback number are correct before ending the call. For a non-emergency, tell them the office will follow up to schedule, and confirm their callback number.
 
 Emergency hand-off: if this is a real emergency, tell the caller you're connecting them to the on-call person right now, and use the transferCall tool immediately. Do not keep asking questions once you've identified a live emergency and gathered the address and callback number — get them to a human fast. You never try to resolve a crisis yourself.
-
+${
+  client.service_area
+    ? `\nService area: ${business} serves ${client.service_area}. If the caller is clearly outside that area, take their details anyway and tell them the office will call back to confirm whether they can help — never turn someone away flatly during an emergency.\n`
+    : ""
+}${client.agent_notes ? `\nSpecific to this company:\n${client.agent_notes}\n` : ""}
 Stay in character as a calm, competent assistant the whole call. If the caller is upset, acknowledge it briefly and keep moving the call forward — don't over-apologize or stall.`;
+}
 
-const FIRST_MESSAGE = `Thanks for calling — you've reached ${site.businessName}'s automated assistant, and this call may be recorded. What's going on?`;
+/**
+ * Build the Vapi assistant for a given client.
+ *
+ * Called per inbound call by the assistant-request route, so it must stay
+ * cheap — pure string assembly, no I/O.
+ */
+export function buildAssistant(client: AgentClient = DEMO_CLIENT) {
+  const business = client.greeting_name || client.name;
+  const transferTo =
+    client.emergency_transfer_number || site.ownerCellE164;
 
-export const restorationAssistant = {
-  name: "restoration-intake-v1",
-  firstMessage: FIRST_MESSAGE,
-  model: {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    temperature: 0.3,
-    messages: [{ role: "system", content: SYSTEM_PROMPT }],
-    tools: [
-      {
-        type: "transferCall",
-        destinations: [
-          {
-            type: "number",
-            number: site.ownerCellE164,
-            message:
-              "Connecting you now — stay on the line.",
-            description:
-              "Use this the moment a live emergency is identified and the caller's address and callback number are captured. Do not delay the transfer to keep gathering non-essential details.",
-          },
-        ],
-      },
-    ],
-  },
-  // Premium voice — this is most of the perceived quality gap vs the
-  // turnkey competitors (billed through Vapi at cost, no separate account).
-  voice: {
-    provider: "11labs",
-    voiceId: "21m00Tcm4TlvDq8ikWAM", // Rachel — natural, professional
-  },
-  transcriber: {
-    provider: "deepgram",
-    model: "nova-3",
-  },
-  // Faster turn-taking: start responding sooner after the caller stops.
-  startSpeakingPlan: {
-    waitSeconds: 0.3,
-  },
-  // Keep latency down; premium voice tiers only if a client complains later.
-  // NOTE: backgroundDenoising stays OFF — Vapi's Krisp path triggers a
-  // mid-call media renegotiation that breaks audio over the Telnyx bridge.
-  backgroundDenoisingEnabled: false,
-  silenceTimeoutSeconds: 30,
-  maxDurationSeconds: 480, // hard per-call ceiling — cap runaway cost/spend
-  analysisPlan: {
-    summaryPlan: {
-      enabled: true,
+  return {
+    name: "restoration-intake-v1",
+    firstMessage: `Thanks for calling — you've reached ${business}'s automated assistant, and this call may be recorded. What's going on?`,
+    model: {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      messages: [{ role: "system", content: buildSystemPrompt(client) }],
+      tools: [
+        {
+          type: "transferCall",
+          destinations: [
+            {
+              type: "number",
+              number: transferTo,
+              message: "Connecting you now — stay on the line.",
+              description:
+                "Use this the moment a live emergency is identified and the caller's address and callback number are captured. Do not delay the transfer to keep gathering non-essential details.",
+            },
+          ],
+        },
+      ],
     },
-    structuredDataPlan: {
-      enabled: true,
-      schema: {
-        type: "object",
-        properties: {
-          emergency: { type: "boolean" },
-          callerName: { type: "string" },
-          callbackNumber: { type: "string" },
-          serviceAddress: { type: "string" },
-          standingWater: { type: "boolean" },
-          category: {
-            type: "string",
-            enum: ["clean", "gray", "black", "unknown"],
+    // Premium voice — this is most of the perceived quality gap vs the
+    // turnkey competitors (billed through Vapi at cost, no separate account).
+    voice: {
+      provider: "11labs",
+      voiceId: "21m00Tcm4TlvDq8ikWAM", // Rachel — natural, professional
+    },
+    transcriber: {
+      provider: "deepgram",
+      model: "nova-3",
+    },
+    // Faster turn-taking: start responding sooner after the caller stops.
+    startSpeakingPlan: {
+      waitSeconds: 0.3,
+    },
+    // Keep latency down; premium voice tiers only if a client complains later.
+    // NOTE: backgroundDenoising stays OFF — Vapi's Krisp path triggers a
+    // mid-call media renegotiation that breaks audio over the Telnyx bridge.
+    backgroundDenoisingEnabled: false,
+    silenceTimeoutSeconds: 30,
+    maxDurationSeconds: 480, // hard per-call ceiling — cap runaway cost/spend
+    analysisPlan: {
+      summaryPlan: {
+        enabled: true,
+      },
+      structuredDataPlan: {
+        enabled: true,
+        schema: {
+          type: "object",
+          properties: {
+            emergency: { type: "boolean" },
+            callerName: { type: "string" },
+            callbackNumber: { type: "string" },
+            serviceAddress: { type: "string" },
+            standingWater: { type: "boolean" },
+            category: {
+              type: "string",
+              enum: ["clean", "gray", "black", "unknown"],
+            },
+            lossDate: { type: "string" },
+            insuranceCarrier: { type: "string" },
+            arrivalWindow: { type: "string" },
+            transferredToOwner: { type: "boolean" },
           },
-          lossDate: { type: "string" },
-          insuranceCarrier: { type: "string" },
-          arrivalWindow: { type: "string" },
-          transferredToOwner: { type: "boolean" },
         },
       },
     },
-  },
-  server: {
-    url: `${site.deployedUrl}/api/vapi/webhook`,
-  },
-} as const;
+    server: {
+      url: `${site.deployedUrl}/api/vapi/webhook`,
+    },
+  };
+}
+
+/**
+ * The demo-line assistant, kept as a named export so
+ * scripts/sync-vapi-assistant.ts keeps working unchanged.
+ */
+export const restorationAssistant = buildAssistant(DEMO_CLIENT);

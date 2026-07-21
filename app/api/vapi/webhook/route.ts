@@ -158,6 +158,13 @@ export async function POST(req: NextRequest) {
   const recordingUrl = (message.artifact as { recordingUrl?: string } | undefined)
     ?.recordingUrl;
 
+  // Vapi has moved this between the envelope and the call object across
+  // versions — read both rather than silently storing null.
+  const callCost =
+    (message.cost as number | undefined) ??
+    (message.call as { cost?: number } | undefined)?.cost ??
+    null;
+
   const callerName = structuredData.callerName as string | undefined;
   const callbackNumber = structuredData.callbackNumber as string | undefined;
   const serviceAddress = structuredData.serviceAddress as string | undefined;
@@ -234,6 +241,10 @@ export async function POST(req: NextRequest) {
         recording_url: recordingUrl,
         owner_notified_at: notified ? new Date().toISOString() : null,
         owner_notify_method: notified ? "email" : null,
+        // Vapi's all-in per-call cost (model + TTS + transcription). Stored so
+        // margin per client is visible as volume grows — measured ~$0.099/min
+        // on a realistic intake call against $297/mo revenue.
+        cost_usd: callCost,
       },
       { onConflict: "vapi_call_id" }
     );
