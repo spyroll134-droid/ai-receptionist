@@ -48,3 +48,23 @@ create table if not exists calls (
 );
 
 alter table calls enable row level security;
+
+-- Client businesses (multi-tenant). Each client gets a private portal at
+-- /portal/<access_key> showing only their own calls.
+create table if not exists clients (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  name text not null,
+  trade text not null default 'Restoration',
+  access_key text unique not null,
+  owner_email text,
+  owner_cell text,
+  -- Which Vapi phone number feeds this client's calls (webhook matches on it)
+  vapi_phone_number_id text,
+  -- Used for the ROI framing in the portal ("revenue protected")
+  avg_ticket_dollars integer default 5000
+);
+
+alter table clients enable row level security;
+
+alter table calls add column if not exists client_id uuid references clients(id);

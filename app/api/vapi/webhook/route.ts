@@ -26,6 +26,7 @@ async function notifyOwner(call: {
   serviceAddress?: string;
   emergency?: boolean;
   summary?: string;
+  toEmail?: string | null;
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -39,7 +40,7 @@ async function notifyOwner(call: {
 
   await resend.emails.send({
     from: `${site.businessName} <onboarding@resend.dev>`,
-    to: [site.ownerEmail],
+    to: [call.toEmail || site.ownerEmail],
     subject,
     text: [
       call.emergency ? "EMERGENCY — warm-transferred live." : "Non-emergency call.",
@@ -96,6 +97,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "missing call id" }, { status: 400 });
   }
 
+  // Attribute the call to a client by which phone number received it;
+  // fall back to the oldest client (single-tenant case) so no call is
+  // ever dropped for lack of a match.
+  const phoneNumberId =
+    (message.phoneNumber as { id?: string } | undefined)?.id ??
+    (call as { phoneNumberId?: string }).phoneNumberId;
+  const supabase = getSupabaseServerClient();
+  let client: { id: string; trade: string; owner_email: string | null } | null = null;
+  try {
+    if (phoneNumberId) {
+      const { data } = await supabase
+        .from("clients")
+        .select("id, trade, owner_email")
+        .eq("vapi_phone_number_id", phoneNumberId)
+        .maybeSingle();
+      client = data;
+    }
+    if (!client) {
+      const { data } = await supabase
+        .from("clients")
+        .select("id, trade, owner_email")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      client = data;
+    }
+  } catch (err) {
+    console.error("Client lookup failed:", err);
+  }
+
   let notified = false;
   try {
     notified = await notifyOwner({
@@ -104,17 +135,18 @@ export async function POST(req: NextRequest) {
       serviceAddress,
       emergency,
       summary,
+      toEmail: client?.owner_email,
     });
   } catch (err) {
     console.error("Owner notification failed:", err);
   }
 
   try {
-    const supabase = getSupabaseServerClient();
     const { error } = await supabase.from("calls").upsert(
       {
         vapi_call_id: call.id,
-        trade: "Restoration",
+        client_id: client?.id ?? null,
+        trade: client?.trade ?? "Restoration",
         caller_name: callerName,
         callback_number: callbackNumber,
         emergency,
@@ -144,3 +176,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+// (getSupabaseServerClient is instantiated once above and reused for both
+// the client lookup and the call upsert.)

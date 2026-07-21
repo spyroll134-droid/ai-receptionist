@@ -1,30 +1,27 @@
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { site } from "@/lib/site-config";
+import {
+  ActivityBars,
+  Badge,
+  CallCard,
+  type CallRow,
+  isAfterHours,
+  Shell,
+  StatTile,
+} from "@/components/dash";
 
-// Internal ops dashboard: every call the AI answers and every trial signup,
-// in one place. Gated by DASHBOARD_KEY (?key=...) — not linked anywhere
-// public. Server-rendered fresh on every load.
+// Internal ops dashboard (owner view): all clients, all calls, all trial
+// signups. Gated by DASHBOARD_KEY (?key=...). Client-facing views live at
+// /portal/<client access_key> and are scoped to one client each.
 
 export const dynamic = "force-dynamic";
 
-type CallRow = {
+type ClientRow = {
   id: string;
-  created_at: string;
+  name: string;
   trade: string;
-  caller_name: string | null;
-  callback_number: string | null;
-  emergency: boolean;
-  standing_water: boolean | null;
-  category: string | null;
-  insurance_carrier: string | null;
-  service_address: string | null;
-  arrival_window: string | null;
-  transferred_to_owner: boolean;
-  booked: boolean;
-  summary: string | null;
-  transcript: string | null;
-  recording_url: string | null;
-  owner_notified_at: string | null;
+  access_key: string;
+  created_at: string;
 };
 
 type SignupRow = {
@@ -37,7 +34,7 @@ type SignupRow = {
   trade: string | null;
 };
 
-function fmt(ts: string) {
+function fmtShort(ts: string) {
   return new Date(ts).toLocaleString("en-US", {
     timeZone: "America/Detroit",
     month: "short",
@@ -45,20 +42,6 @@ function fmt(ts: string) {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function Badge({ children, tone }: { children: React.ReactNode; tone: "red" | "green" | "slate" | "blue" }) {
-  const tones = {
-    red: "bg-red-100 text-red-800",
-    green: "bg-green-100 text-green-800",
-    slate: "bg-slate-100 text-slate-700",
-    blue: "bg-blue-100 text-blue-800",
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>
-      {children}
-    </span>
-  );
 }
 
 export default async function Dashboard({
@@ -70,136 +53,116 @@ export default async function Dashboard({
   const expected = process.env.DASHBOARD_KEY;
   if (!expected || key !== expected) {
     return (
-      <main className="mx-auto max-w-md px-6 py-32 text-center">
-        <h1 className="text-xl font-semibold text-slate-900">Not authorized</h1>
-        <p className="mt-2 text-sm text-slate-500">
+      <Shell title="Not authorized" subtitle="">
+        <p className="mt-16 text-center text-sm text-slate-500">
           Append ?key=YOUR_KEY to the URL.
         </p>
-      </main>
+      </Shell>
     );
   }
 
   const supabase = getSupabaseServerClient();
-  const [{ data: calls }, { data: signups }] = await Promise.all([
-    supabase
-      .from("calls")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50),
-    supabase
-      .from("trial_signups")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50),
+  const [{ data: calls }, { data: signups }, { data: clients }] = await Promise.all([
+    supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(100),
+    supabase.from("trial_signups").select("*").order("created_at", { ascending: false }).limit(50),
+    supabase.from("clients").select("*").order("created_at", { ascending: true }),
   ]);
 
   const callRows = (calls ?? []) as CallRow[];
   const signupRows = (signups ?? []) as SignupRow[];
+  const clientRows = (clients ?? []) as ClientRow[];
+  const clientName = new Map(clientRows.map((c) => [c.id, c.name]));
+
   const emergencies = callRows.filter((c) => c.emergency).length;
   const booked = callRows.filter((c) => c.booked).length;
+  const afterHours = callRows.filter((c) => isAfterHours(c.created_at)).length;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">
-          {site.businessName} — Operations
-        </h1>
-        <span className="text-sm text-slate-500">
-          Live from the database · refresh for latest
-        </span>
-      </header>
-
-      <section className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {[
-          ["Calls answered", callRows.length],
-          ["Emergencies", emergencies],
-          ["Jobs booked", booked],
-          ["Trial signups", signupRows.length],
-        ].map(([label, n]) => (
-          <div key={label as string} className="rounded-xl border border-slate-200 p-4">
-            <div className="text-3xl font-semibold text-slate-900">{n}</div>
-            <div className="mt-1 text-sm text-slate-500">{label}</div>
-          </div>
-        ))}
+    <Shell title={`${site.businessName} — Operations`} subtitle="All clients · live from the database">
+      <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <StatTile label="Calls answered" value={callRows.length} />
+        <StatTile label="Emergencies" value={emergencies} accent="red" />
+        <StatTile label="Jobs booked" value={booked} accent="green" />
+        <StatTile label="After-hours saves" value={afterHours} />
+        <StatTile label="Trial signups" value={signupRows.length} />
       </section>
 
-      <section className="mt-12">
-        <h2 className="text-lg font-semibold text-slate-900">Calls</h2>
+      <section className="mt-6">
+        <ActivityBars calls={callRows} />
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-white">Clients</h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {clientRows.map((c) => {
+            const n = callRows.filter((r) => r.client_id === c.id).length;
+            return (
+              <div key={c.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-white">{c.name}</span>
+                  <Badge tone="info">{c.trade}</Badge>
+                </div>
+                <div className="mt-2 text-sm text-slate-500">{n} calls logged</div>
+                <a
+                  href={`/portal/${c.access_key}`}
+                  className="mt-3 inline-block break-all text-xs font-medium text-[#7cb3f2] hover:text-white"
+                >
+                  Client portal → /portal/{c.access_key}
+                </a>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-white">Calls</h2>
         {callRows.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">
-            No calls logged yet. Call the demo line — every completed call
-            lands here automatically with its transcript and intake data.
+          <p className="mt-4 text-sm text-slate-500">
+            No calls yet — call the demo line and it lands here automatically.
           </p>
         ) : (
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 space-y-3">
             {callRows.map((c) => (
-              <details key={c.id} className="rounded-xl border border-slate-200 p-4">
-                <summary className="flex cursor-pointer flex-wrap items-center gap-3 list-none">
-                  <span className="font-medium text-slate-900">
-                    {c.caller_name || "Unknown caller"}
-                  </span>
-                  <span className="text-sm text-slate-500">{fmt(c.created_at)}</span>
-                  {c.emergency ? <Badge tone="red">EMERGENCY</Badge> : <Badge tone="slate">routine</Badge>}
-                  {c.booked && <Badge tone="green">booked</Badge>}
-                  {c.transferred_to_owner && <Badge tone="blue">transferred</Badge>}
-                  <span className="ml-auto text-sm text-slate-500">{c.trade}</span>
-                </summary>
-                <div className="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
-                  <div>Callback: {c.callback_number ?? "—"}</div>
-                  <div>Address: {c.service_address ?? "—"}</div>
-                  <div>Standing water: {c.standing_water == null ? "—" : c.standing_water ? "yes" : "no"}</div>
-                  <div>Category: {c.category ?? "—"}</div>
-                  <div>Insurance: {c.insurance_carrier ?? "—"}</div>
-                  <div>Arrival window: {c.arrival_window ?? "—"}</div>
-                  <div>Owner notified: {c.owner_notified_at ? fmt(c.owner_notified_at) : "not yet"}</div>
-                  {c.recording_url && (
-                    <div>
-                      <a href={c.recording_url} className="text-blue-600 underline">
-                        Recording
-                      </a>
-                    </div>
-                  )}
-                </div>
-                {c.summary && (
-                  <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{c.summary}</p>
+              <div key={c.id}>
+                {clientRows.length > 1 && (
+                  <div className="mb-1 pl-1 text-xs text-slate-600">
+                    {clientName.get(c.client_id ?? "") ?? "Unassigned"}
+                  </div>
                 )}
-                {c.transcript && (
-                  <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-                    {c.transcript}
-                  </pre>
-                )}
-              </details>
+                <CallCard c={c} />
+              </div>
             ))}
           </div>
         )}
       </section>
 
-      <section className="mt-12">
-        <h2 className="text-lg font-semibold text-slate-900">Trial signups</h2>
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-white">Trial signups</h2>
         {signupRows.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">
-            No signups yet. Submissions from the website form land here.
+          <p className="mt-4 text-sm text-slate-500">
+            Website form submissions land here.
           </p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
+            <table className="w-full text-left text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500">
-                  <th className="py-2 pr-4 font-medium">When</th>
-                  <th className="py-2 pr-4 font-medium">Company</th>
-                  <th className="py-2 pr-4 font-medium">Contact</th>
-                  <th className="py-2 pr-4 font-medium">Phone</th>
-                  <th className="py-2 pr-4 font-medium">Trade</th>
+                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 font-medium">When</th>
+                  <th className="px-4 py-3 font-medium">Company</th>
+                  <th className="px-4 py-3 font-medium">Contact</th>
+                  <th className="px-4 py-3 font-medium">Phone</th>
+                  <th className="px-4 py-3 font-medium">Trade</th>
                 </tr>
               </thead>
               <tbody>
                 {signupRows.map((s) => (
-                  <tr key={s.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4 text-slate-500">{fmt(s.created_at)}</td>
-                    <td className="py-2 pr-4 font-medium text-slate-900">{s.company_name}</td>
-                    <td className="py-2 pr-4">{s.contact_name}</td>
-                    <td className="py-2 pr-4">{s.phone}</td>
-                    <td className="py-2 pr-4">{s.trade ?? "—"}</td>
+                  <tr key={s.id} className="border-b border-white/5 last:border-0">
+                    <td className="px-4 py-3 text-slate-500">{fmtShort(s.created_at)}</td>
+                    <td className="px-4 py-3 font-medium text-white">{s.company_name}</td>
+                    <td className="px-4 py-3">{s.contact_name}</td>
+                    <td className="px-4 py-3">{s.phone}</td>
+                    <td className="px-4 py-3">{s.trade ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -207,6 +170,6 @@ export default async function Dashboard({
           </div>
         )}
       </section>
-    </main>
+    </Shell>
   );
 }
