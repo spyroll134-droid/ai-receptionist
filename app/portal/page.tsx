@@ -5,6 +5,7 @@ import { requestNow } from "@/lib/now";
 import { signOut } from "@/app/actions/auth";
 import { ActivityBars, type CallRow, isDeadAir, Shell, StatTile } from "@/components/dash";
 import CallTable from "@/components/CallTable";
+import AvgTicketEditor from "@/components/AvgTicketEditor";
 
 // Signed-in client portal. Replaces the /portal/<access_key> link scheme:
 // the key used to be the whole credential, which meant it sat in browser
@@ -69,7 +70,13 @@ export default async function Portal() {
         <StatTile
           label="Revenue protected"
           value={`$${protectedRevenue.toLocaleString()}`}
-          sub={`${booked} booked × $${avgTicket.toLocaleString()} avg ticket`}
+          sub={
+            <AvgTicketEditor
+              booked={booked}
+              avgTicket={avgTicket}
+              isOverride={client.avg_ticket_dollars != null}
+            />
+          }
           accent="green"
         />
       </section>

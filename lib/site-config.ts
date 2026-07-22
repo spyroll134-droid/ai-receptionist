@@ -15,7 +15,10 @@ export const site = {
 
   // Live demo line (Telnyx number routed to the Vapi assistant).
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
-  demoPhoneDisplay: "(918) 223-4411",
+  // Leading 1 shown deliberately: this number gets read aloud on cold calls and
+  // dialled from job-site landlines and desk phones, where the 1 is required.
+  // The href keeps E.164 (+1…) which mobile handles either way.
+  demoPhoneDisplay: "1 (918) 223-4411",
   demoPhoneHref: "tel:+19182234411",
   contactEmail: "hello@thebackupline.com",
   // Same line as the demo, on purpose. (313) 555-0100 used to sit here and
@@ -23,7 +26,7 @@ export const site = {
   // real is worse than no number. Pointing contact at the AI line means it
   // always answers AND demos the product to anyone who calls it.
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
-  contactPhoneDisplay: "(918) 223-4411",
+  contactPhoneDisplay: "1 (918) 223-4411",
   contactPhoneHref: "tel:+19182234411",
   calendarUrl: "https://cal.com/thebackupline/demo",
 
@@ -40,10 +43,17 @@ export const site = {
 
   // Default average job value per trade, for the portal's "revenue protected"
   // tile. A client's avg_ticket_dollars column overrides this when set —
-  // these only apply when that column is null. Rough industry figures;
-  // adjust freely, nothing downstream depends on the exact numbers.
+  // these only apply when that column is null.
+  //
+  // Sourced from 2025–26 national cost guides (Angi/HomeAdvisor/Modernize),
+  // biased toward after-hours emergency work since that's what the AI
+  // catches: restoration = mitigation avg ~$3.9k plus partial rebuild;
+  // roofing = blend of storm repairs (~$4.3k) and replacements ($17k+);
+  // plumbing = emergency visits $150–$500, complex jobs $500–$2k at
+  // after-hours rates. Clients who quote a different number get it set in
+  // avg_ticket_dollars instead of editing these.
   avgTicketByTrade: {
-    Restoration: 7500,
+    Restoration: 6000,
     Roofing: 9000,
     Plumbing: 750,
   } as Record<string, number>,

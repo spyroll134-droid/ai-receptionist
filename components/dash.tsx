@@ -13,6 +13,7 @@ export type CallRow = {
   trade: string;
   caller_name: string | null;
   callback_number: string | null;
+  caller_id: string | null;
   emergency: boolean;
   standing_water: boolean | null;
   category: string | null;
@@ -97,7 +98,7 @@ export function StatTile({
 }: {
   label: string;
   value: string | number;
-  sub?: string;
+  sub?: React.ReactNode;
   accent?: "blue" | "red" | "green";
 }) {
   const bar =
@@ -224,6 +225,11 @@ export function CallCard({ c }: { c: CallRow }) {
         <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
           {[
             ["Callback", c.callback_number],
+            // Shown only when it differs — the number they dialed from is
+            // worth having when the assistant mis-heard the spoken one.
+            ...(c.caller_id && c.caller_id !== c.callback_number
+              ? ([["Called from", c.caller_id]] as [string, string | null][])
+              : []),
             ["Address", c.service_address],
             [
               "Standing water",

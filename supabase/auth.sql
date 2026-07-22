@@ -69,6 +69,32 @@ create policy "own calls" on calls
 drop policy if exists "no client access" on trial_signups;
 
 -- ---------------------------------------------------------------------------
+-- 3b. Self-service average ticket
+--     Clients may adjust ONE column on their row: avg_ticket_dollars (the
+--     "revenue protected" assumption in their portal). A narrow RPC instead
+--     of an update policy, so the rest of the row (name, phone number id,
+--     transfer number) stays read-only to them. SECURITY DEFINER + the
+--     current_client_id() lookup means a signed-out request updates nothing.
+-- ---------------------------------------------------------------------------
+
+create or replace function set_avg_ticket(p_dollars integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Null reverts the client to their trade's default (site.avgTicketByTrade).
+  if p_dollars is not null and (p_dollars < 50 or p_dollars > 1000000) then
+    raise exception 'avg ticket out of range';
+  end if;
+  update clients
+     set avg_ticket_dollars = p_dollars
+   where id = current_client_id();
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 4. Verification — after running, this should return one row per policy.
 --    calls + clients + client_users = 3 policies expected.
 -- ---------------------------------------------------------------------------

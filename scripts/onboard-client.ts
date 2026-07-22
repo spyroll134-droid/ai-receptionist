@@ -33,6 +33,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
+import { site } from "../lib/site-config";
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(`--${flag}`);
@@ -47,11 +48,19 @@ const trade = arg("trade") ?? "Restoration";
 const area = arg("area");
 const greeting = arg("greeting") ?? name;
 const notes = arg("notes");
+// Ask during the setup call: "what's your average job worth?" Owners always
+// know. Omit to fall back to the trade default (site.avgTicketByTrade).
+const avgTicketArg = arg("avg-ticket");
+const avgTicket = avgTicketArg ? Number(avgTicketArg.replace(/[$,]/g, "")) : null;
+if (avgTicketArg && (!Number.isInteger(avgTicket) || avgTicket! < 50)) {
+  console.error(`--avg-ticket must be a whole dollar amount, got "${avgTicketArg}"`);
+  process.exit(1);
+}
 
 if (!name || !email || !phoneNumberId || !transfer) {
   console.error(
     "Required: --name, --email, --phone-number-id, --transfer\n" +
-      "Optional: --trade --area --greeting --notes"
+      "Optional: --trade --area --greeting --notes --avg-ticket"
   );
   process.exit(1);
 }
@@ -60,9 +69,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const VAPI_KEY = process.env.VAPI_API_KEY;
 const WEBHOOK_SECRET = process.env.VAPI_WEBHOOK_SECRET;
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  "https://ai-receptionist-eight-umber.vercel.app";
+// The live production domain is the single source of truth in site-config.
+// NEXT_PUBLIC_SITE_URL may override it for a preview deploy, but the old
+// hardcoded fallback pointed onboarding — password links, Vapi webhook URL —
+// at a stale preview deployment whenever that env var was absent.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? site.deployedUrl;
 
 if (!SUPABASE_URL || !SERVICE_KEY || !VAPI_KEY || !WEBHOOK_SECRET) {
   console.error(
@@ -137,6 +148,7 @@ async function main() {
       emergency_transfer_number: transfer,
       service_area: area ?? null,
       agent_notes: notes ?? null,
+      avg_ticket_dollars: avgTicket,
     })
     .select("id")
     .single();
@@ -176,6 +188,16 @@ async function main() {
 
   // ---- 4. Handoff ---------------------------------------------------------
   const aiNumber = vapiNumber.number ?? "(see Vapi dashboard)";
+  // GSM MMI codes want the destination in a dialable form; Verizon's *71
+  // wants bare digits. Fall back to a placeholder if Vapi didn't return the
+  // number, so the printed codes are obviously incomplete rather than wrong.
+  const digits = aiNumber.replace(/\D/g, "");
+  const dest = digits ? (digits.length === 10 ? `1${digits}` : digits) : "AI-NUMBER";
+  const vzNoAnswer = digits ? `*71${digits.slice(-10)}` : "*71<AI-NUMBER>";
+  const gsmNoAnswer = `**61*${dest}**20#`; // 20 = ring seconds before forwarding
+  const gsmBusy = `**67*${dest}#`;
+  const gsmUnreach = `**62*${dest}#`;
+  const gsmAll = `**004*${dest}#`;
   console.log(`
   ${name} is onboarded
   ═══════════════════════════════════════════════
@@ -191,11 +213,27 @@ async function main() {
   ${setupLink}
   Sign in after: ${SITE_URL}/login
 
-  SET NO-ANSWER FORWARDING ON THEIR PHONE
+  SET CONDITIONAL FORWARDING ON THEIR PHONE
   ───────────────────────────────────────────────
-  Verizon     *71${aiNumber.replace(/\D/g, "")}      (disable: *73)
-  AT&T        **61*1${aiNumber.replace(/\D/g, "")}#  (disable: ##61#)
-  T-Mobile    **61*${aiNumber}**20#                  (disable: ##61#)
+  Dial these once from the client's cell as if placing a call.
+  Cover all THREE conditions so nothing slips past the AI — a call
+  that only forwards on no-answer still hits carrier voicemail when
+  the line is busy or the phone is off.
+
+    No answer     ${vzNoAnswer}          (undo: *73)     [Verizon]
+                  ${gsmNoAnswer}   (undo: ##61#)   [AT&T / T-Mobile]
+    Busy          ${gsmBusy}   (undo: ##67#)   [AT&T / T-Mobile]
+    Unreachable   ${gsmUnreach}   (undo: ##62#)   [phone off / no signal]
+
+  Or set all three at once (GSM carriers):
+    All           ${gsmAll}   (undo: ##004#)
+  Verify no-answer is live:  *#61#
+
+  RING TIMER: set no-answer forwarding to ring ~15–20 seconds before
+  it kicks over. Too short and the owner never gets a chance to grab a
+  real customer; too long and the caller gives up before the AI answers.
+  On GSM the seconds go in the code (…**SS#, e.g. **20#); Verizon fixes
+  it in the carrier's account settings.
 
   THEN PLACE A LIVE TEST CALL
   ───────────────────────────────────────────────
@@ -204,6 +242,8 @@ async function main() {
     - a full intake completes
     - the owner email arrives
     - an emergency transfer connects to ${transfer}
+  Then repeat with the line BUSY and with the phone OFF — each should
+  reach the AI, not carrier voicemail.
 `);
 }
 
