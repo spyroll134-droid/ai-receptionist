@@ -1,6 +1,18 @@
 import { site } from "@/lib/site-config";
 
-export default function DemoCallout() {
+// Same trade-awareness as the hero: the scenario has to be the one THEY get
+// called about at 2am, or the demo proves the line answers without proving it
+// understands their work.
+
+export default function DemoCallout({
+  trade,
+}: {
+  trade?: keyof typeof site.tradePages;
+}) {
+  const emergency = trade
+    ? site.tradePages[trade].emergency
+    : "standing water in the basement from a burst pipe";
+
   return (
     <section className="bg-blue-600">
       <div className="mx-auto max-w-4xl px-6 py-16 text-center text-white">
@@ -8,9 +20,8 @@ export default function DemoCallout() {
           Don&apos;t take our word for it — call it
         </h2>
         <p className="mt-4 text-blue-100 max-w-xl mx-auto">
-          Dial the number below and tell it you&apos;ve got standing water in
-          the basement from a burst pipe. Answer its questions like a real
-          caller would. That&apos;s the whole demo.
+          Dial the number below and tell it you&apos;ve got {emergency}. Answer
+          its questions like a real caller would. That&apos;s the whole demo.
         </p>
         <a
           href={site.demoPhoneHref}

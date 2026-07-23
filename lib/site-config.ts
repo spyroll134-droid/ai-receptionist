@@ -13,6 +13,30 @@ export const site = {
   // plumbing. Order here controls display order across the site.
   trades: ["Restoration", "Roofing", "Plumbing"] as const,
 
+  // Per-trade landing copy. This is the whole expansion strategy in one object:
+  // adding a trade is a config entry, not a page. A visitor who lands on
+  // /for/roofing never sees the word "plumbing", so growing the trade list can
+  // never change the page an existing customer was sold on — the pages are
+  // additive, not rewritten.
+  //
+  // `emergency` is the scenario the demo prompt tells them to act out. It has
+  // to be THEIR emergency: telling a roofer to say "burst pipe" proves the
+  // line answers, but not that it understands roofing. `slug` is the URL.
+  tradePages: {
+    restoration: {
+      trade: "Restoration",
+      emergency: "standing water in the basement from a burst pipe",
+    },
+    roofing: {
+      trade: "Roofing",
+      emergency: "water coming through the ceiling in the middle of a storm",
+    },
+    plumbing: {
+      trade: "Plumbing",
+      emergency: "sewage backing up into the downstairs shower",
+    },
+  } as const,
+
   // Live demo line (Telnyx number routed to the Vapi assistant).
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.
   // Leading 1 shown deliberately: this number gets read aloud on cold calls and
