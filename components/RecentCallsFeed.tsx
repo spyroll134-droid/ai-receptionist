@@ -69,7 +69,7 @@ function FeedRow({ c, avgTicket }: { c: CallRow; avgTicket: number }) {
               type="button"
               aria-expanded={open === "listen"}
               onClick={() => toggle("listen")}
-              className="inline-flex items-center gap-1.5 rounded-md border border-line-default px-2.5 py-1 text-xs font-medium text-content-secondary transition-colors hover:border-line-strong hover:text-content-primary"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line-default px-2.5 py-1 text-xs font-medium text-content-secondary outline-none transition-colors hover:border-line-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
             >
               <span aria-hidden>▶</span> Listen
             </button>
@@ -79,7 +79,7 @@ function FeedRow({ c, avgTicket }: { c: CallRow; avgTicket: number }) {
               type="button"
               aria-expanded={open === "transcript"}
               onClick={() => toggle("transcript")}
-              className="inline-flex items-center gap-1.5 rounded-md border border-line-default px-2.5 py-1 text-xs font-medium text-content-secondary transition-colors hover:border-line-strong hover:text-content-primary"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line-default px-2.5 py-1 text-xs font-medium text-content-secondary outline-none transition-colors hover:border-line-strong hover:text-content-primary focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
             >
               <span aria-hidden>≡</span> Transcript
             </button>
