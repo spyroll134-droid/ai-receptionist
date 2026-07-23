@@ -1,4 +1,4 @@
-import { site, tradesLabel } from "@/lib/site-config";
+import { site } from "@/lib/site-config";
 
 // The hero, in two modes. Without a `trade` it speaks to every trade we sell to
 // today; with one it speaks to exactly that trade and never names the others.
@@ -32,7 +32,7 @@ export default function Hero({ trade }: { trade?: keyof typeof site.tradePages }
         <p className="text-sm font-medium text-blue-300 uppercase tracking-wide">
           {page
             ? `Built for ${page.trade.toLowerCase()} companies`
-            : `Built for ${tradesLabel()} companies`}
+            : `Built for ${site.audienceLabel}`}
         </p>
         <h1 className="mt-4 text-4xl sm:text-6xl font-semibold tracking-tight text-balance">
           Your team already answers most calls.{" "}

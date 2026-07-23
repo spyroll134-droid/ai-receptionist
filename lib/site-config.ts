@@ -13,6 +13,13 @@ export const site = {
   // plumbing. Order here controls display order across the site.
   trades: ["Restoration", "Roofing", "Plumbing"] as const,
 
+  // Who the generic homepage speaks to. Deliberately broader than `trades`:
+  // the homepage's job is to not disqualify anyone who got the link
+  // secondhand, and naming three trades quietly turned away every electrician
+  // and HVAC company who read it. The specificity lives on the /for/<trade>
+  // pages instead, which is where targeted outreach sends people anyway.
+  audienceLabel: "home-service contractors",
+
   // Per-trade landing copy. This is the whole expansion strategy in one object:
   // adding a trade is a config entry, not a page. A visitor who lands on
   // /for/roofing never sees the word "plumbing", so growing the trade list can
