@@ -1,6 +1,3 @@
-import Link from "next/link";
-import { site } from "@/lib/site-config";
-
 // Shared UI for the ops dashboard and client portals. Draws entirely from the
 // tokens in globals.css so the portal and the marketing site read as one
 // product. Status is never communicated by color alone — every status color
@@ -14,6 +11,9 @@ export type CallRow = {
   caller_name: string | null;
   callback_number: string | null;
   caller_id: string | null;
+  caller_cnam: string | null;
+  caller_line_type: string | null;
+  message_for_owner: string | null;
   emergency: boolean;
   standing_water: boolean | null;
   category: string | null;
@@ -28,7 +28,39 @@ export type CallRow = {
   owner_notified_at: string | null;
   client_id: string | null;
   ended_reason: string | null;
+  // Lead disposition (supabase/lead-lifecycle.sql). Seeded from intake on
+  // insert — scheduled / contacted / new — and moved by the owner from there.
+  // won / lost are only ever set by a human: no system knows if a job closed.
+  lead_status: "new" | "contacted" | "scheduled" | "won" | "lost";
+  // When a human last moved the disposition (or tapped Call back / Text).
+  // Null = untouched since intake; the follow-up queue sorts on it.
+  dispositioned_at: string | null;
+  // Stored by the webhook since day one but never surfaced — the intake asks
+  // for the loss date and it was only visible by querying Supabase by hand.
+  loss_date: string | null;
+  owner_notify_method: string | null;
+  // When the owner tapped "I've got this" on an emergency (supabase/
+  // emergency-ack.sql). Null = not yet acknowledged. Clears the call out of the
+  // red "needs a callback" banner and stands as the response-time record.
+  acknowledged_at: string | null;
+  /** Vapi's all-in per-call cost. Ops-only — never shown in a client portal. */
+  cost_usd: number | null;
 };
+
+/**
+ * Did this call look like it wasn't a customer at all?
+ *
+ * Keyed off the agent's own runtime classification — it only fills in
+ * message_for_owner once it has decided the caller isn't requesting service —
+ * rather than off the CNAM record. Content beats metadata here: the agent
+ * heard "this is Dr. Chen's office calling for John", where a carrier database
+ * can only offer a stale name and is usually blank for mobiles.
+ *
+ * Used to SUGGEST routing the number to voicemail. Never to do it.
+ */
+export function looksPersonal(c: CallRow) {
+  return Boolean(c.message_for_owner?.trim()) && !c.emergency && !c.booked;
+}
 
 /**
  * A call that never became a conversation: it silence-timed-out and no
@@ -45,6 +77,60 @@ export function isDeadAir(c: CallRow) {
   );
 }
 
+// A lead the owner still has to chase: captured, not yet won or lost, and not
+// an emergency (those have their own act-now banner). Shared by the follow-up
+// queue and the call-log filter so "needs follow-up" means the same thing in
+// both places. A `scheduled` job is off the list — it's on the calendar.
+export function needsFollowUp(c: CallRow) {
+  return (
+    !c.emergency && (c.lead_status === "new" || c.lead_status === "contacted")
+  );
+}
+
+// A lead is "due for a nudge" this many days after it was last touched. Two
+// days: chase a new estimate within 48h or it goes cold, but don't badge a
+// lead that came in this morning. One knob, shared by the queue and the portal
+// count so "due" means the same number everywhere.
+export const NUDGE_AFTER_DAYS = 2;
+
+// The last time anything happened to this lead: a human disposition or a
+// tap-to-contact (dispositioned_at), else intake (created_at). This is the
+// clock the nudge queue measures against — tapping Call back / Text resets it
+// (mark_followed_up bumps dispositioned_at), so a lead the owner just chased
+// stops being "due" without any separate last-nudged column.
+export function lastLeadActivity(c: CallRow) {
+  return c.dispositioned_at ?? c.created_at;
+}
+
+// Is this lead overdue for a proactive follow-up? A followable lead (see
+// needsFollowUp) that has gone quiet for NUDGE_AFTER_DAYS. This is what the
+// portal counts as "N due for a nudge" and what the queue flags — the send
+// still happens from the owner's own phone via the existing sms:/tel: link.
+export function isDueForNudge(c: CallRow, nowMs: number) {
+  if (!needsFollowUp(c)) return false;
+  const ageMs = nowMs - new Date(lastLeadActivity(c)).getTime();
+  return ageMs >= NUDGE_AFTER_DAYS * 86400_000;
+}
+
+// A booked job this many days old is almost certainly past its service date —
+// it either happened (won) or fell through (lost). We can't read that from
+// arrival_window (it's free text: "Tuesday morning"), so age since booking is
+// the trigger. Seven days: long enough that most jobs have run, short enough
+// that the owner still remembers the call.
+export const RECONCILE_AFTER_DAYS = 7;
+
+// Does this booked job need the owner to confirm its outcome? Only `scheduled`
+// leads (a job on the calendar) that are old enough to have happened. This is
+// the other half of the lifecycle from needsFollowUp — chasing leads vs.
+// closing them out — and it's what feeds real won/lost data back in, since no
+// system can know whether a quote turned into a paid job. won / lost are
+// already resolved, so they drop off.
+export function needsReconcile(c: CallRow, nowMs: number) {
+  if (c.lead_status !== "scheduled") return false;
+  const ageMs = nowMs - new Date(c.created_at).getTime();
+  return ageMs >= RECONCILE_AFTER_DAYS * 86400_000;
+}
+
 export function fmt(ts: string) {
   return new Date(ts).toLocaleString("en-US", {
     timeZone: "America/Detroit",
@@ -53,6 +139,61 @@ export function fmt(ts: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/**
+ * Speed-to-lead: how long between the call landing and the first alert reaching
+ * the owner (owner_notified_at − created_at). This is the real, stored latency
+ * that matters — not "how fast did the AI pick up" (it answers instantly and we
+ * don't clock it), but "how fast was the job in your hand." Returns null when
+ * the call never triggered an alert, so callers can skip it rather than show a
+ * meaningless zero. Formatted tight: seconds under 90s, else whole minutes.
+ */
+export function speedToLead(c: CallRow): { ms: number; label: string } | null {
+  if (!c.owner_notified_at) return null;
+  const ms = new Date(c.owner_notified_at).getTime() - new Date(c.created_at).getTime();
+  // Clock skew or a backfilled row can make this negative; treat as "instant"
+  // rather than printing a nonsensical "-3s".
+  const clamped = Math.max(0, ms);
+  const secs = Math.round(clamped / 1000);
+  const label = secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`;
+  return { ms: clamped, label };
+}
+
+/** Median speed-to-lead across the calls that actually alerted the owner. */
+export function medianSpeedToLead(calls: CallRow[]): string | null {
+  const spans = calls
+    .map((c) => speedToLead(c)?.ms)
+    .filter((ms): ms is number => ms != null)
+    .sort((a, b) => a - b);
+  if (spans.length === 0) return null;
+  const mid = spans[Math.floor(spans.length / 2)];
+  const secs = Math.round(mid / 1000);
+  return secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`;
+}
+
+// The one outcome each call gets on the dashboard's 24-hour line strip and its
+// recent-calls feed. A call can carry several truths at once (an emergency that
+// booked); this collapses them to the single tick color, most-urgent first, so
+// the strip reads at a glance. Deliberately NOT a "quote" bucket — no such
+// outcome exists in the data (see SCOPE.md); a captured non-service message is
+// its own gray tick.
+export type CallOutcome = "emergency" | "booked" | "transferred" | "message" | "routine";
+
+export function outcomeOf(c: CallRow): CallOutcome {
+  if (c.emergency) return "emergency";
+  if (c.booked) return "booked";
+  if (c.transferred_to_owner) return "transferred";
+  if (c.message_for_owner?.trim()) return "message";
+  return "routine";
+}
+
+// Whole-number percent change of `current` against `previous`. Null when the
+// prior period was empty — there is no honest percentage against zero, so the
+// hero says "new this period" instead of printing a fake +100% or ∞.
+export function deltaPct(current: number, previous: number): number | null {
+  if (previous <= 0) return null;
+  return Math.round(((current - previous) / previous) * 100);
 }
 
 export function isAfterHours(ts: string) {
@@ -90,29 +231,53 @@ export function Badge({
   );
 }
 
-export function StatTile({
-  label,
-  value,
-  sub,
-  accent,
+/**
+ * The status badges for one call — the single definition, used by the internal
+ * call log, the internal detail panel, and the client portal's table.
+ *
+ * This exists because it was duplicated three times and the copies drifted.
+ * The portal's copy omitted "Transferred" entirely, which hid the one outcome
+ * that justifies the subscription: an emergency that reached a human. And
+ * because its no-badges fallback also forgot to test `transferred_to_owner`, a
+ * transferred-but-not-booked call during business hours rendered as "Routine"
+ * — the most valuable call the system produces, labelled as the least. One
+ * component means the next status added shows up in all three places or none.
+ *
+ * Every badge carries a glyph as well as a tone (▲ ✓ → ☾). That is load-bearing,
+ * not decoration: critical red and caution amber are not separable under
+ * deuteranopia, and the mitigation is that colour is never the only signal.
+ * If you add a badge, give it a glyph.
+ *
+ * `fallback` is what to render when a call has no status at all:
+ *   "dash"    — an em-dash, for dense internal tables where a badge on every
+ *               row would flatten the ones that matter.
+ *   "routine" — an explicit "Routine" badge, for the portal and the detail
+ *               panel, where a bare dash reads as missing data rather than as
+ *               "nothing needed doing."
+ */
+export function StatusBadges({
+  c,
+  fallback = "dash",
 }: {
-  label: string;
-  value: string | number;
-  sub?: React.ReactNode;
-  accent?: "blue" | "red" | "green";
+  c: CallRow;
+  fallback?: "dash" | "routine";
 }) {
-  const bar =
-    accent === "red"
-      ? "bg-critical"
-      : accent === "green"
-        ? "bg-positive"
-        : "bg-accent";
+  const afterHours = isAfterHours(c.created_at);
+  const none =
+    !c.emergency && !c.booked && !c.transferred_to_owner && !afterHours;
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-line-default bg-surface-raised p-5 shadow-card">
-      <div className={`absolute inset-x-0 top-0 h-0.5 ${bar}`} />
-      <div className="text-3xl font-semibold text-content-primary">{value}</div>
-      <div className="mt-1.5 text-sm text-content-secondary">{label}</div>
-      {sub && <div className="mt-0.5 text-xs text-content-tertiary">{sub}</div>}
+    <div className="flex flex-wrap items-center gap-1.5">
+      {c.emergency && <Badge tone="critical">▲ Emergency</Badge>}
+      {c.booked && <Badge tone="good">✓ Booked</Badge>}
+      {c.transferred_to_owner && <Badge tone="info">→ Transferred</Badge>}
+      {afterHours && <Badge tone="warning">☾ After-hours</Badge>}
+      {none &&
+        (fallback === "routine" ? (
+          <Badge tone="muted">Routine</Badge>
+        ) : (
+          <span className="text-content-faint">—</span>
+        ))}
     </div>
   );
 }
@@ -127,12 +292,20 @@ export function StatTile({
 export function ActivityBars({
   calls,
   nowMs,
+  windowDays = 14,
+  title,
 }: {
   calls: CallRow[];
   nowMs: number;
+  /** How many days the strip spans. Callers with a date filter pass its
+   *  value, so the chart and the table below it describe the same period —
+   *  a chart that silently ignores the filter above it is a chart that lies. */
+  windowDays?: number;
+  title?: string;
 }) {
+  const span = Math.max(1, Math.min(90, Math.round(windowDays)));
   const days: { key: string; label: string; n: number }[] = [];
-  for (let i = 13; i >= 0; i--) {
+  for (let i = span - 1; i >= 0; i--) {
     const d = new Date(nowMs - i * 86400_000);
     const key = d.toLocaleDateString("en-US", { timeZone: "America/Detroit" });
     days.push({
@@ -155,16 +328,43 @@ export function ActivityBars({
   const max = Math.max(1, ...days.map((d) => d.n));
 
   return (
-    <div className="rounded-2xl border border-line-default bg-surface-raised p-5 shadow-card">
+    <div className="rounded-lg border border-line-default bg-surface-raised p-5">
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-medium text-content-secondary">
-          Calls — last 14 days
+          {title ?? `Calls — last ${span} days`}
         </h3>
         <span className="text-xs text-content-tertiary">daily totals</span>
       </div>
-      <div className="mt-5 flex h-24 items-end gap-[3px]">
+      {/* Screen-reader path: the same daily counts as a real table, navigable
+          with table commands. The visual bars are decorative (aria-hidden).
+          Previously every bar was its own tab stop — up to 90 of them — so a
+          keyboard user had to tab through the entire chart to get past it. The
+          data lived only in a hover tooltip before that, unreachable without a
+          mouse; this keeps the data reachable AND out of the tab sequence. */}
+      <table className="sr-only">
+        <caption>{title ?? `Calls — last ${span} days`}, daily totals</caption>
+        <thead>
+          <tr>
+            <th scope="col">Day</th>
+            <th scope="col">Calls</th>
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((d) => (
+            <tr key={d.key}>
+              <th scope="row">{d.label}</th>
+              <td>{d.n}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <ul
+        aria-hidden
+        className="mt-5 flex h-24 list-none items-end gap-[3px]"
+      >
         {days.map((d) => (
-          <div key={d.key} className="group relative flex-1">
+          <li key={d.key} className="group relative flex-1 rounded-sm">
             <div
               className="w-full rounded-t-sm bg-accent transition-opacity group-hover:opacity-75"
               style={{
@@ -180,145 +380,16 @@ export function ActivityBars({
                 {d.n}
               </div>
             )}
-          </div>
+          </li>
         ))}
-      </div>
-      <div className="mt-2 flex justify-between text-2xs text-content-faint">
+      </ul>
+      <div
+        aria-hidden
+        className="mt-2 flex justify-between text-2xs text-content-tertiary"
+      >
         <span>{days[0].label}</span>
         <span>{days[days.length - 1].label}</span>
       </div>
-    </div>
-  );
-}
-
-export function CallCard({ c }: { c: CallRow }) {
-  return (
-    <details className="group overflow-hidden rounded-2xl border border-line-default bg-surface-raised shadow-card transition-colors hover:border-line-strong open:border-line-strong">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 p-4">
-        <span
-          aria-hidden
-          className={`h-2 w-2 flex-none rounded-full ${
-            c.emergency ? "bg-critical" : "bg-accent"
-          }`}
-        />
-        <span className="font-medium text-content-primary">
-          {c.caller_name || "Unknown caller"}
-        </span>
-        <span className="text-sm text-content-tertiary">{fmt(c.created_at)}</span>
-        {c.emergency ? (
-          <Badge tone="critical">▲ Emergency</Badge>
-        ) : (
-          <Badge tone="muted">Routine</Badge>
-        )}
-        {c.booked && <Badge tone="good">✓ Booked</Badge>}
-        {c.transferred_to_owner && <Badge tone="info">→ Transferred</Badge>}
-        {isAfterHours(c.created_at) && <Badge tone="warning">☾ After-hours</Badge>}
-        <span
-          aria-hidden
-          className="ml-auto text-xs text-content-tertiary transition-transform duration-200 group-open:rotate-90"
-        >
-          ▸
-        </span>
-      </summary>
-
-      <div className="border-t border-line-subtle p-4">
-        <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
-          {[
-            ["Callback", c.callback_number],
-            // Shown only when it differs — the number they dialed from is
-            // worth having when the assistant mis-heard the spoken one.
-            ...(c.caller_id && c.caller_id !== c.callback_number
-              ? ([["Called from", c.caller_id]] as [string, string | null][])
-              : []),
-            ["Address", c.service_address],
-            [
-              "Standing water",
-              c.standing_water == null ? null : c.standing_water ? "Yes" : "No",
-            ],
-            ["Water category", c.category],
-            ["Insurance", c.insurance_carrier],
-            ["Arrival window", c.arrival_window],
-          ].map(([label, val]) => (
-            <div
-              key={label as string}
-              className="flex justify-between gap-4 sm:justify-start"
-            >
-              <dt className="w-32 flex-none text-content-tertiary">{label}</dt>
-              <dd className="text-content-primary">{(val as string) ?? "—"}</dd>
-            </div>
-          ))}
-        </dl>
-
-        {c.summary && (
-          <p className="mt-4 rounded-xl border border-accent-line bg-accent-surface p-3.5 text-sm leading-relaxed text-content-primary">
-            {c.summary}
-          </p>
-        )}
-
-        {c.transcript && (
-          <pre className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-line-subtle bg-surface-inset p-3.5 font-mono text-xs leading-relaxed text-content-secondary">
-            {c.transcript}
-          </pre>
-        )}
-
-        {c.recording_url && (
-          <a
-            href={c.recording_url}
-            className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-accent-text transition-colors hover:text-content-primary"
-          >
-            ▶ Play recording
-          </a>
-        )}
-      </div>
-    </details>
-  );
-}
-
-export function Shell({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    // The product surface owns the dark theme locally — the marketing site
-    // stays light. Everything inside here draws from the tokens.
-    <div className="min-h-screen bg-surface-base text-content-primary">
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 top-0 h-64"
-        style={{
-          background:
-            "radial-gradient(70% 100% at 50% 0%, rgba(59,130,246,0.10), transparent 70%)",
-        }}
-      />
-
-      <div className="relative border-b border-line-subtle">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-          <Link
-            href="/"
-            className="text-sm font-semibold tracking-tight text-content-primary"
-          >
-            {site.businessName}
-          </Link>
-          <span className="text-xs text-content-faint">Detroit time</span>
-        </div>
-      </div>
-
-      <main className="relative mx-auto max-w-6xl px-6 py-10">
-        <header className="flex flex-wrap items-baseline justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-semibold text-content-primary">{title}</h1>
-            {subtitle && (
-              <p className="mt-1 text-sm text-content-tertiary">{subtitle}</p>
-            )}
-          </div>
-        </header>
-        {children}
-      </main>
     </div>
   );
 }
