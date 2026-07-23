@@ -4,9 +4,7 @@ import { avgTicketFor, site } from "@/lib/site-config";
 import { getCurrentClient, getSupabaseSessionClient } from "@/lib/supabase-auth";
 import { requestNow } from "@/lib/now";
 import {
-  Badge,
   deltaPct,
-  fmt,
   isDeadAir,
   isDueForNudge,
   medianSpeedToLead,
@@ -93,9 +91,8 @@ export default async function Portal() {
   ).length;
   const toConfirm = connected.filter((c) => needsReconcile(c, nowMs)).length;
 
-  // The proof feed and the booked snapshot: newest first (calls arrive desc).
-  const recent = connected.slice(0, 8);
-  const recentBooked = connected.filter((c) => c.booked).slice(0, 3);
+  // The proof feed: a short glance of the newest calls (depth lives in Calls).
+  const recent = connected.slice(0, 4);
 
   // Trial proof, hoisted while the trial is live.
   const trialEndsMs =
@@ -167,8 +164,14 @@ export default async function Portal() {
 
       {/* FOUR KPIs — each a real, measured deliverable. No "answer rate" (~100%
           by design) and no "answer speed" (unclocked); the honest responsiveness
-          metric is speed-to-lead (alert-to-phone). */}
-      <div className="mt-4">
+          metric is speed-to-lead (alert-to-phone). The label anchors the window
+          so the 30-day KPIs never get read against the 24-hour strip below. */}
+      <div className="mt-4 mb-1.5 px-1">
+        <span className="text-2xs font-semibold uppercase tracking-wide text-content-tertiary">
+          Last {PERIOD_DAYS} days
+        </span>
+      </div>
+      <div>
         <StatStrip
           items={[
             { label: "Calls caught", value: period.length },
@@ -231,45 +234,6 @@ export default async function Portal() {
           )}
         </Panel>
       </div>
-
-      {/* Booked-jobs snapshot — source attribution, links to the full ledger. */}
-      {recentBooked.length > 0 && (
-        <div className="mt-4">
-          <Panel
-            title="Booked by your AI line"
-            action={
-              <Link
-                href="/portal/bookings"
-                className="text-2xs font-medium text-accent-text hover:text-content-primary"
-              >
-                All bookings →
-              </Link>
-            }
-          >
-            <ul className="divide-y divide-line-subtle">
-              {recentBooked.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-content-primary">
-                      {c.caller_name || "Unknown caller"}
-                    </span>
-                    <Badge tone="good">✓ Booked by your AI line</Badge>
-                    <span className="text-2xs text-content-faint">
-                      {fmt(c.created_at)}
-                    </span>
-                  </div>
-                  <span className="text-sm font-medium tabular-nums text-positive-text">
-                    ~${avgTicket.toLocaleString()}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        </div>
-      )}
 
       {/* Activation driver — real settings only. */}
       <div className="mt-4">
