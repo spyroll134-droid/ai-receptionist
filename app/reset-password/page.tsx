@@ -132,7 +132,7 @@ export default function ResetPassword() {
         className="pointer-events-none fixed inset-x-0 top-0 h-80"
         style={{
           background:
-            "radial-gradient(60% 100% at 50% 0%, rgba(59,130,246,0.13), transparent 70%)",
+            "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%)",
         }}
       />
 

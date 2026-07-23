@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   Trademark Web — design tokens
+   The Backup Line — design tokens
    ----------------------------------------------------------------------------
    Single source of truth for the marketing site AND the client portal. Both
    surfaces read from here so they read as one product. Direction: "refined
@@ -21,10 +21,16 @@
   --color-surface-inset: #08080a;
 
   /* --- Text: four steps. Body copy must use -primary or -secondary only.
-         -tertiary is for labels, -faint for decorative metadata. ----------- */
+         -tertiary is for labels, -faint for decorative metadata.
+         -tertiary is the default label color for every table header, tile
+         label, badge and timestamp, so it MUST clear WCAG AA 4.5:1. #6e6e7a
+         measured 3.4–4.0:1 across the surface tokens (below AA); #82828f
+         measures ~4.56:1 on the worst case (surface-overlay) and higher
+         elsewhere, and still reads as a distinct step from both -secondary
+         (#a1a1ae) above and -faint (#4a4a55) below. ----------------------- */
   --color-content-primary: #e8e9ed;
   --color-content-secondary: #a1a1ae;
-  --color-content-tertiary: #6e6e7a;
+  --color-content-tertiary: #82828f;
   --color-content-faint: #4a4a55;
 
   /* --- Borders ------------------------------------------------------------ */
@@ -37,12 +43,40 @@
   --color-accent: #3b82f6;
   --color-accent-hover: #5b9bff;
   --color-accent-press: #2f6fd6;
+  /* Fill for a SOLID button carrying white (--color-accent-contrast) text.
+     Kept separate from --color-accent because white on #3b82f6 is only 3.68:1
+     (below AA for button-size text): #2f6fd6 clears it at ~4.8:1. Hover/press
+     go DARKER, not lighter, so every state stays ≥ AA — the old
+     hover:accent-hover (#5b9bff) dropped white to ~2.7:1. Leave --color-accent
+     itself for lines, data series and accent text where it isn't a text bg. */
+  --color-accent-button: #2f6fd6;
+  --color-accent-button-hover: #2861bd;
+  --color-accent-button-press: #21509c;
   --color-accent-text: #93bbfd;
   --color-accent-surface: #3b82f61f;
   --color-accent-line: #3b82f64d;
+  /* Foreground for text sitting ON --color-accent. White today, but the two
+     places that needed it were hardcoding `text-white`, which quietly makes
+     the accent unchangeable: lighten the blue and those labels fail contrast
+     with nothing pointing at them. Named so there is one place to fix. */
+  --color-accent-contrast: #ffffff;
 
   /* --- Status: tuned for contrast on a near-black base. Each has a -text
-         variant (legible as type) and a -surface variant (fills/chips). ---- */
+         variant (legible as type) and a -surface variant (fills/chips).
+
+         MEASURED CONSTRAINT — do not "fix" this palette without re-measuring.
+         Under Vienot deuteranopia simulation (~6% of men), the pairs are:
+           critical / positive   dE 84   ok
+           critical / accent     dE 142  ok
+           critical / caution    dE 9.5  COLLIDES
+         So red and amber are indistinguishable to a deuteranope, and no choice
+         of red and amber fixes that — they are the same hue post-simulation.
+         The rule that follows: critical and caution may never be the ONLY
+         difference between two things. Wherever they appear together
+         (Emergency vs After-hours badges in CallTable) each already carries a
+         glyph and a word, which is what makes it legible. Keep it that way.
+         Green/red is NOT a problem here despite what docs/dashboard-design.md
+         claims; that doc's prescribed replacements score slightly worse. ---- */
   --color-critical: #e5484d;
   --color-critical-text: #ff9592;
   --color-critical-surface: #e5484d1f;
@@ -134,9 +168,23 @@
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Tabular figures everywhere: stat tiles and call counts shouldn't
-       shift width as digits change. */
+  }
+
+  /* Tabular figures ONLY where digits stack vertically and need to align.
+     This used to sit on `body`, which meant it inherited into display-size
+     numbers — equal-width digits make "$297" and "121" read loose and gappy
+     at 3xl+. Hero and stat-tile values want proportional figures. */
+  table,
+  .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* The nav is sticky at h-16, so an un-offset anchor drops the target
+     heading underneath it — "Pricing" jumps to a spot where the heading is
+     hidden behind the bar. */
+  :target,
+  [id] {
+    scroll-margin-top: 5rem;
   }
 
   /* One visible, consistent focus ring across the whole product. Keyboard
@@ -149,7 +197,7 @@
 
   ::selection {
     background-color: var(--color-accent);
-    color: #fff;
+    color: var(--color-accent-contrast);
   }
 
   /* Respect the OS reduced-motion setting rather than animating regardless. */

@@ -68,9 +68,26 @@ export default async function Portal() {
 
   const period = connected.filter(inPeriod);
   const bookedNow = period.filter((c) => c.booked).length;
-  const bookedPrev = connected.filter(inPrevPeriod).filter((c) => c.booked).length;
-  const heroValue = bookedNow * avgTicket;
-  const heroDelta = deltaPct(bookedNow, bookedPrev);
+
+  // The revenue rule: only a job the owner has marked WON is money. `booked`
+  // means the AI committed an arrival window — a promise, not a sale — so it
+  // reads as pipeline and sits below the headline. Won is keyed on lead_status
+  // alone, and scheduled explicitly excludes won/lost, so no job is ever
+  // counted in both places.
+  const wonNow = period.filter((c) => c.lead_status === "won").length;
+  const wonPrev = connected
+    .filter(inPrevPeriod)
+    .filter((c) => c.lead_status === "won").length;
+  const scheduledNow = period.filter(
+    (c) => c.booked && c.lead_status !== "won" && c.lead_status !== "lost",
+  ).length;
+
+  const wonValue = wonNow * avgTicket;
+  const scheduledValue = scheduledNow * avgTicket;
+  // Delta tracks the won count, not the dollars — the dollars only move
+  // because the count did, so a percentage on money would be the same number
+  // dressed up as something it isn't.
+  const heroDelta = deltaPct(wonNow, wonPrev);
 
   const emergenciesNow = period.filter((c) => c.emergency).length;
   const alertSpeed = medianSpeedToLead(period);
@@ -152,11 +169,14 @@ export default async function Portal() {
         </div>
       )}
 
-      {/* HERO — the estimated value of booked jobs, this period. */}
+      {/* HERO — jobs won as the count, estimated dollars as the translation. */}
       <PortalHero
-        value={heroValue}
-        booked={bookedNow}
+        won={wonNow}
+        wonValue={wonValue}
+        scheduled={scheduledNow}
+        scheduledValue={scheduledValue}
         avgTicket={avgTicket}
+        ticketIsOwn={client.avg_ticket_dollars != null}
         callsCaught={period.length}
         delta={heroDelta}
         periodLabel="period"

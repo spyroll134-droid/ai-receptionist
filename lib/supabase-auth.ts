@@ -72,6 +72,31 @@ export async function getCurrentClient() {
 }
 
 /**
+ * Does the current session also have a client portal to look at?
+ *
+ * Separate from getCurrentClient() because this is asked by chrome, not by a
+ * page: it decides whether to offer the "Client view" switch. An admin who
+ * isn't attached to any client must not be offered it — /portal would bounce
+ * them to /login, which bounces them back to /dashboard, and a link that
+ * returns you to where you started reads as broken.
+ */
+export async function hasClientPortal(): Promise<boolean> {
+  const supabase = await getSupabaseSessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from("client_users")
+    .select("client_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
+/**
  * Is the current session an admin (ops dashboard)?
  *
  * Checked against the `admins` table rather than a shared secret, so access is

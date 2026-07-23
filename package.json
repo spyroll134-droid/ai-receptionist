@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync-vapi": "npx --yes tsx --conditions=react-server scripts/sync-vapi-assistant.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
@@ -14,7 +15,8 @@
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "resend": "^6.17.2"
+    "resend": "^6.17.2",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

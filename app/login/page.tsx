@@ -1,22 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useActionState, useState } from "react";
 import { site } from "@/lib/site-config";
 import { signIn, requestPasswordReset, type AuthState } from "@/app/actions/auth";
 import { Button, Card, Field } from "@/components/ui";
 
 // Client sign-in. Email + password via Supabase Auth; the session lands in an
 // httpOnly cookie and proxy.ts keeps it fresh. Accounts are provisioned by
-// Trademark Web during setup (scripts/create-client-login.ts) — there is no
+// The Backup Line during setup (scripts/create-client-login.ts) — there is no
 // public signup, because onboarding includes carrier forwarding we do by hand.
 
-export default function Login() {
+// useSearchParams needs a Suspense boundary or it opts the whole route out of
+// static rendering.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <Login />
+    </Suspense>
+  );
+}
+
+function Login() {
   const [state, formAction, pending] = useActionState<AuthState, FormData>(
     signIn,
     undefined
   );
   const [showReset, setShowReset] = useState(false);
+  // proxy.ts puts the blocked path here when it bounces a signed-out user.
+  // Without submitting it, signIn() always fell back to /portal.
+  const next = useSearchParams().get("next") ?? "";
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-surface-base px-6 py-16 text-content-primary">
@@ -25,7 +39,7 @@ export default function Login() {
         className="pointer-events-none fixed inset-x-0 top-0 h-80"
         style={{
           background:
-            "radial-gradient(60% 100% at 50% 0%, rgba(59,130,246,0.13), transparent 70%)",
+            "radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%)",
         }}
       />
 
@@ -38,7 +52,7 @@ export default function Login() {
             {site.businessName}
           </Link>
           <h1 className="mt-8 text-2xl font-semibold text-content-primary">
-            {showReset ? "Reset your password" : "Client sign in"}
+            {showReset ? "Reset your password" : "Sign in"}
           </h1>
           <p className="mt-2 text-sm text-content-secondary">
             {showReset
@@ -52,6 +66,7 @@ export default function Login() {
             <ResetForm onBack={() => setShowReset(false)} />
           ) : (
             <form action={formAction} className="space-y-4">
+              <input type="hidden" name="next" value={next} />
               <Field
                 label="Email"
                 name="email"
@@ -112,7 +127,13 @@ function ResetForm({ onBack }: { onBack: () => void }) {
     requestPasswordReset,
     undefined
   );
-  const [sent, setSent] = useState(false);
+  // Derive "sent" from the action result, never from onSubmit. The old code
+  // flipped a useState synchronously on submit, so the confirmation showed even
+  // when the server action threw or the network dropped — telling a locked-out
+  // user a link was on its way when it wasn't. requestPasswordReset returns
+  // undefined initially, { error } on validation failure, and { error: undefined }
+  // on success (anti-enumeration: it never reveals whether the address exists).
+  const sent = state !== undefined && !state.error && !pending;
 
   if (sent) {
     return (
@@ -132,7 +153,7 @@ function ResetForm({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <form action={formAction} onSubmit={() => setSent(true)} className="space-y-4">
+    <form action={formAction} className="space-y-4">
       <Field
         label="Email"
         name="email"

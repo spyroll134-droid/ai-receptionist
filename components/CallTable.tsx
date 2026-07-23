@@ -1,7 +1,19 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { Badge, fmt, isAfterHours, type CallRow } from "./dash";
+import {
+  StatusBadges,
+  fmt,
+  isAfterHours,
+  looksPersonal,
+  needsFollowUp,
+  type CallRow,
+} from "./dash";
+import { prettyPhone, telHref, smsHref } from "@/lib/phone";
+import { isUnnotified } from "@/lib/notified";
+import { markFollowedUp } from "@/app/actions/portal";
+import VoicemailToggle from "./VoicemailToggle";
+import LeadStatus from "./LeadStatus";
 
 // The client's system of record. A dashboard stops feeling like a toy the
 // moment the data can be interrogated — searched, filtered, sorted, and taken
@@ -11,7 +23,16 @@ import { Badge, fmt, isAfterHours, type CallRow } from "./dash";
 type SortKey = "created_at" | "caller_name" | "status" | "value";
 type SortDir = "asc" | "desc";
 type RangeKey = "7d" | "30d" | "90d" | "all";
-type StatusKey = "all" | "emergency" | "booked" | "after_hours" | "missed_notify";
+type StatusKey =
+  | "all"
+  | "needs_followup"
+  | "emergency"
+  | "booked"
+  | "transferred"
+  | "after_hours"
+  | "missed_notify"
+  | "won"
+  | "lost";
 
 const RANGES: { key: RangeKey; label: string; days: number | null }[] = [
   { key: "7d", label: "7 days", days: 7 },
@@ -22,10 +43,20 @@ const RANGES: { key: RangeKey; label: string; days: number | null }[] = [
 
 const STATUSES: { key: StatusKey; label: string }[] = [
   { key: "all", label: "All calls" },
+  // Same predicate as the follow-up queue above the log (dash needsFollowUp),
+  // so filtering the log to "needs follow-up" shows exactly that queue's leads.
+  { key: "needs_followup", label: "Needs follow-up" },
   { key: "emergency", label: "Emergencies" },
   { key: "booked", label: "Booked" },
+  // Matches the `transferred` case in filterCalls (lib/ops.ts) — the badge is
+  // rendered, so it has to be filterable too.
+  { key: "transferred", label: "Transferred" },
   { key: "after_hours", label: "After-hours" },
-  { key: "missed_notify", label: "Not notified" },
+  { key: "missed_notify", label: "Never notified" },
+  // Closed dispositions. The Outcomes tab is the full ledger; these exist so
+  // the log itself can also answer "which of these calls did I win?"
+  { key: "won", label: "✓ Won" },
+  { key: "lost", label: "✕ Lost" },
 ];
 
 /**
@@ -46,17 +77,12 @@ function relative(ts: string, nowMs: number) {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
-function formatPhone(raw: string | null) {
-  if (!raw) return "—";
-  const d = raw.replace(/\D/g, "");
-  const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
-  if (ten.length !== 10) return raw;
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
-}
-
+// Ranked to match the badge order rendered below, so sorting by Status groups
+// rows the same way the eye already groups them.
 function statusRank(c: CallRow) {
-  if (c.emergency) return 3;
-  if (c.booked) return 2;
+  if (c.emergency) return 4;
+  if (c.booked) return 3;
+  if (c.transferred_to_owner) return 2;
   if (isAfterHours(c.created_at)) return 1;
   return 0;
 }
@@ -72,12 +98,19 @@ export default function CallTable({
   avgTicket,
   clientName,
   nowMs,
+  voicemailNumbers,
 }: {
   calls: CallRow[];
   avgTicket: number;
   clientName: string;
   /** Server-generated timestamp — see `relative()` for why this is a prop. */
   nowMs: number;
+  /**
+   * Numbers already routed to voicemail, normalized to 10 digits. Omitted on
+   * the internal ops dashboard, which has no client session to write as —
+   * the toggle only renders when this is provided.
+   */
+  voicemailNumbers?: string[];
 }) {
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<RangeKey>("30d");
@@ -94,10 +127,19 @@ export default function CallTable({
     const rows = calls.filter((c) => {
       if (cutoff && new Date(c.created_at).getTime() < cutoff) return false;
 
+      if (status === "needs_followup" && !needsFollowUp(c)) return false;
       if (status === "emergency" && !c.emergency) return false;
       if (status === "booked" && !c.booked) return false;
+      if (status === "transferred" && !c.transferred_to_owner) return false;
       if (status === "after_hours" && !isAfterHours(c.created_at)) return false;
-      if (status === "missed_notify" && c.owner_notified_at) return false;
+      // Same rule the dashboard banner uses (lib/notified), not a looser local
+      // one. `!owner_notified_at` alone also matches every call from before
+      // Resend was configured and every pocket dial that timed out in silence
+      // — rows nothing you click will ever clear. A filter that always has
+      // results is indistinguishable from a filter that is broken.
+      if (status === "missed_notify" && !isUnnotified(c, nowMs)) return false;
+      if (status === "won" && c.lead_status !== "won") return false;
+      if (status === "lost" && c.lead_status !== "lost") return false;
 
       if (!q) return true;
       // Search across everything a person would plausibly remember about a call.
@@ -108,6 +150,11 @@ export default function CallTable({
         c.summary,
         c.category,
         c.insurance_carrier,
+        // The transcript is the fallback for every call where extraction missed
+        // a detail the caller mentioned (a street name, "sump pump") — the ops
+        // search covers it (lib/ops.ts), so the portal must too.
+        c.transcript,
+        c.message_for_owner,
       ]
         .filter(Boolean)
         .some((f) => String(f).toLowerCase().includes(q));
@@ -155,6 +202,7 @@ export default function CallTable({
       "Callback",
       "Emergency",
       "Booked",
+      "Transferred",
       "After hours",
       "Address",
       "Category",
@@ -169,9 +217,10 @@ export default function CallTable({
         [
           fmt(c.created_at),
           c.caller_name ?? "",
-          formatPhone(c.callback_number),
+          prettyPhone(c.callback_number) ?? "",
           c.emergency ? "Yes" : "No",
           c.booked ? "Yes" : "No",
+          c.transferred_to_owner ? "Yes" : "No",
           isAfterHours(c.created_at) ? "Yes" : "No",
           c.service_address ?? "",
           c.category ?? "",
@@ -201,9 +250,14 @@ export default function CallTable({
   const hasAnyCalls = calls.length > 0;
 
   return (
-    <section className="mt-10">
+    // Rendered inside <Panel title="Call log">, which supplies the header and
+    // the framing border. So no card of our own here — a full-bleed table
+    // framed by the Panel, with only the toolbar and count row padded in to
+    // match the panel header's inset. (Standalone this component would need its
+    // own border back; it has exactly one call site — the portal.)
+    <section className="pb-4 pt-4">
       {/* ---- Toolbar ---------------------------------------------------- */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 px-4">
         <div className="relative min-w-55 flex-1">
           <label htmlFor="call-search" className="sr-only">
             Search calls
@@ -254,17 +308,19 @@ export default function CallTable({
         </button>
       </div>
 
-      <p className="mt-3 text-xs text-content-tertiary" aria-live="polite">
+      <p className="mt-3 px-4 text-xs text-content-tertiary" aria-live="polite">
         {filtered.length} of {calls.length} call{calls.length === 1 ? "" : "s"}
         {query && <> matching “{query}”</>}
       </p>
 
       {/* ---- Table ------------------------------------------------------ */}
-      <div className="mt-3 overflow-hidden rounded-2xl border border-line-default bg-surface-raised shadow-card">
+      <div className="mt-3 overflow-hidden border-t border-line-default">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[46rem] border-collapse text-sm">
             <thead>
               <tr className="border-b border-line-default text-left">
+                {/* Caret column — holds the real disclosure button per row. */}
+                <th className="w-0" aria-hidden />
                 <Th
                   label="Caller"
                   active={sortKey === "caller_name"}
@@ -303,20 +359,42 @@ export default function CallTable({
                   // Key belongs on the Fragment — it's the mapped element.
                   <Fragment key={c.id}>
                     <tr
+                      // Mouse convenience only — the accessible disclosure is
+                      // the caret button in the first cell. The row used to be
+                      // role="button" with tabIndex, but it contains links
+                      // (the callback number), and a button may not contain
+                      // interactive descendants — screen readers couldn't reach
+                      // them. The real button carries aria-expanded instead.
                       onClick={() => setOpenId(open ? null : c.id)}
-                      tabIndex={0}
-                      role="button"
-                      aria-expanded={open}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setOpenId(open ? null : c.id);
-                        }
-                      }}
                       className={`cursor-pointer border-b border-line-subtle transition-colors hover:bg-surface-overlay ${
                         open ? "bg-surface-overlay" : ""
                       }`}
                     >
+                      <td className="py-3 pl-4 pr-0">
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          aria-label={
+                            open
+                              ? `Collapse details for ${c.caller_name || "unknown caller"}`
+                              : `Expand details for ${c.caller_name || "unknown caller"}`
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenId(open ? null : c.id);
+                          }}
+                          className="flex h-6 w-6 items-center justify-center rounded text-content-tertiary transition-colors hover:text-content-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          <span
+                            aria-hidden
+                            className={`inline-block transition-transform ${
+                              open ? "rotate-90" : ""
+                            }`}
+                          >
+                            ›
+                          </span>
+                        </button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <span
@@ -337,19 +415,35 @@ export default function CallTable({
                         {relative(c.created_at, nowMs)}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {c.emergency && <Badge tone="critical">▲ Emergency</Badge>}
-                          {c.booked && <Badge tone="good">✓ Booked</Badge>}
-                          {isAfterHours(c.created_at) && (
-                            <Badge tone="warning">☾ After-hours</Badge>
-                          )}
-                          {!c.emergency && !c.booked && !isAfterHours(c.created_at) && (
-                            <Badge tone="muted">Routine</Badge>
-                          )}
-                        </div>
+                        {/* One definition, shared with the internal call log
+                            and detail panel (components/dash StatusBadges).
+                            The copy that used to live here had drifted: it
+                            omitted Transferred, so a transferred emergency —
+                            the outcome this product exists to produce — showed
+                            up in the portal as "Routine". */}
+                        <StatusBadges c={c} fallback="routine" />
                       </td>
+                      {/* Tappable, like PhoneLink in ops.tsx. This is read on a
+                          phone on a job site, and calling the lead back is the
+                          entire point of the row — plain text made the operator
+                          retype a number they were already looking at. */}
                       <td className="px-4 py-3 font-mono text-xs text-content-secondary">
-                        {formatPhone(c.callback_number)}
+                        {(() => {
+                          const pretty = prettyPhone(c.callback_number);
+                          const href = telHref(c.callback_number);
+                          if (!pretty)
+                            return <span className="text-content-faint">—</span>;
+                          if (!href) return pretty;
+                          return (
+                            <a
+                              href={href}
+                              onClick={(e) => e.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 transition-colors hover:text-content-primary"
+                            >
+                              {pretty}
+                            </a>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right text-content-primary">
                         {c.booked ? `$${avgTicket.toLocaleString()}` : "—"}
@@ -358,9 +452,65 @@ export default function CallTable({
 
                     {open && (
                       <tr className="border-b border-line-subtle">
-                        <td colSpan={5} className="bg-surface-inset px-4 py-4">
+                        <td colSpan={6} className="bg-surface-inset px-4 py-4">
+                          {/* The two things anyone does next with a lead —
+                              call them or text them — with the follow-up
+                              message pre-written. These lived only in the
+                              admin detail panel; the person on the job site
+                              who has to make the call got a bare number. */}
+                          {(() => {
+                            const reach = c.callback_number || c.caller_id;
+                            if (!reach) return null;
+                            const call = telHref(reach);
+                            const text = smsHref(
+                              reach,
+                              `Hi${
+                                c.caller_name
+                                  ? ` ${c.caller_name.split(" ")[0]}`
+                                  : ""
+                              }, this is ${clientName} following up on your call.`,
+                            );
+                            return (
+                              <div className="mb-4 flex gap-2">
+                                {call && (
+                                  <a
+                                    href={call}
+                                    // Tapping Call back is the owner working
+                                    // the lead, so advance new -> contacted and
+                                    // let the follow-up queue drop it. Fire-and-
+                                    // forget: the dialer still opens; the RPC
+                                    // only moves a lead that's still `new`.
+                                    onClick={() => markFollowedUp(c.id)}
+                                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent-button px-3 text-xs font-medium text-accent-contrast transition-colors hover:bg-accent-button-hover"
+                                  >
+                                    <span aria-hidden>✆</span> Call back
+                                  </a>
+                                )}
+                                {text && (
+                                  <a
+                                    href={text}
+                                    onClick={() => markFollowedUp(c.id)}
+                                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-line-default px-3 text-xs font-medium text-content-secondary transition-colors hover:border-line-strong hover:text-content-primary"
+                                  >
+                                    <span aria-hidden>✉</span> Text
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Where this lead sits in the pipeline. Seeded from
+                              intake, moved by the owner. This is the write that
+                              makes the log a CRM. */}
+                          <LeadStatus callId={c.id} value={c.lead_status} />
+
                           <dl className="grid gap-x-8 gap-y-2.5 text-sm sm:grid-cols-2">
                             {[
+                              // Number only. The carrier's caller-name record
+                              // was measured as wrong on every number we could
+                              // verify, and a stale name shown next to a real
+                              // number reads as fact. See scripts/cnam-probe.ts.
+                              ["Called from", c.caller_id],
                               ["Address", c.service_address],
                               [
                                 "Standing water",
@@ -391,6 +541,19 @@ export default function CallTable({
                             ))}
                           </dl>
 
+                          {/* A non-customer's message is the point of that
+                              call — it outranks the generic summary. */}
+                          {c.message_for_owner && (
+                            <div className="mt-4 rounded-xl border border-caution-line bg-caution-surface p-3.5">
+                              <div className="text-2xs font-semibold uppercase text-content-tertiary">
+                                Message for you
+                              </div>
+                              <p className="mt-1 text-sm leading-relaxed text-content-primary">
+                                {c.message_for_owner}
+                              </p>
+                            </div>
+                          )}
+
                           {c.summary && (
                             <p className="mt-4 rounded-xl border border-accent-line bg-accent-surface p-3.5 text-sm leading-relaxed text-content-primary">
                               {c.summary}
@@ -409,13 +572,39 @@ export default function CallTable({
                           )}
 
                           {c.recording_url && (
+                            // Not c.recording_url — that's a private R2 object
+                            // and won't play. /api/recording mints a fresh
+                            // presigned URL behind the session on each play.
                             <audio
                               controls
                               preload="none"
-                              src={c.recording_url}
+                              src={`/api/recording/${c.id}`}
                               className="mt-3 h-9 w-full max-w-md"
                             />
                           )}
+
+                          {/* Routing keys off the number the call actually
+                              came from, so it needs caller_id — a spoken
+                              callback number would never match an inbound
+                              call and the setting would look applied while
+                              doing nothing. Web-demo calls have no caller_id
+                              at all, so say why instead of showing nothing. */}
+                          {voicemailNumbers &&
+                            (c.caller_id ? (
+                              <VoicemailToggle
+                                number={c.caller_id}
+                                enabled={voicemailNumbers.includes(
+                                  c.caller_id.replace(/\D/g, "").slice(-10)
+                                )}
+                                suggested={looksPersonal(c)}
+                              />
+                            ) : (
+                              <p className="mt-4 text-xs text-content-tertiary">
+                                No caller ID on this call, so it can&apos;t be
+                                routed to voicemail. Calls that come in over the
+                                phone always have one.
+                              </p>
+                            ))}
                         </td>
                       </tr>
                     )}

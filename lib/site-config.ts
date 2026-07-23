@@ -30,10 +30,16 @@ export const site = {
   contactPhoneHref: "tel:+19182234411",
   calendarUrl: "https://cal.com/thebackupline/demo",
 
-  // PRIVATE — used server-side / in the Vapi agent only.
-  // Never render these anywhere on the public site.
-  ownerCellE164: "+12484023630", // emergency warm-transfer destination
-  ownerEmail: "spyroll134@gmail.com", // call notifications land here
+  // The owner's cell and email USED to live here behind a "PRIVATE, never
+  // render this publicly" comment. They now live in lib/owner-config.ts, which
+  // is marked `server-only` so the build fails if a client component imports
+  // it. They had to move: this object is imported by "use client" pages
+  // (app/login, app/reset-password), and a single object literal can't be
+  // tree-shaken property by property — so everything in here ships to the
+  // browser whether it's rendered or not.
+  //
+  // Treat this file as PUBLIC. Anything added below is readable by anyone who
+  // opens devtools. Secrets and personal contact details go in owner-config.
 
   pricing: {
     monthly: 297,

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { verifyVapiSecret } from "@/lib/vapi-auth";
-import { buildAssistant, DEMO_CLIENT, type AgentClient } from "@/lib/vapi-config";
+import {
+  buildAssistant,
+  buildVoicemailAssistant,
+  DEMO_CLIENT,
+  normalizePhone,
+  type AgentClient,
+} from "@/lib/vapi-config";
 
 // Multi-tenant assistant resolution.
 //
@@ -51,7 +57,14 @@ export async function POST(req: NextRequest) {
     (message.phoneNumber as { id?: string } | undefined)?.id ??
     (message.call as { phoneNumberId?: string } | undefined)?.phoneNumberId;
 
-  let client: AgentClient | null = null;
+  // Who is calling, for the voicemail-numbers check below.
+  const callerNumber = normalizePhone(
+    (message.customer as { number?: string } | undefined)?.number ??
+      (message.call as { customer?: { number?: string } } | undefined)?.customer
+        ?.number
+  );
+
+  let client: (AgentClient & { voicemail_numbers?: string[] }) | null = null;
 
   if (phoneNumberId) {
     try {
@@ -59,7 +72,7 @@ export async function POST(req: NextRequest) {
       const { data } = await supabase
         .from("clients")
         .select(
-          "name, greeting_name, trade, service_area, emergency_transfer_number, agent_notes"
+          "name, greeting_name, trade, service_area, emergency_transfer_number, agent_notes, voicemail_numbers"
         )
         .eq("vapi_phone_number_id", phoneNumberId)
         .maybeSingle();
@@ -68,6 +81,15 @@ export async function POST(req: NextRequest) {
       // Never let a database hiccup drop a live call. Log it and fall back.
       console.error("assistant-request client lookup failed:", err);
     }
+  }
+
+  // Numbers the client routed to voicemail from the portal — their doctor,
+  // their kid's school, their wife. Answered and emailed like any other call;
+  // they just get a message-taking greeting instead of a restoration intake,
+  // and no ability to ring the owner's cell as an emergency.
+  if (client && callerNumber && client.voicemail_numbers?.includes(callerNumber)) {
+    console.log(`assistant-request: voicemail mode for caller ${callerNumber}`);
+    return NextResponse.json({ assistant: buildVoicemailAssistant(client) });
   }
 
   if (!client) {

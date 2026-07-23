@@ -1,4 +1,4 @@
-# Trademark Web — AI receptionist
+# The Backup Line — AI receptionist
 
 The whole product lives in this one repo: marketing site, ops dashboard,
 Vapi voice-agent config, and the webhook backend that ties calls to the

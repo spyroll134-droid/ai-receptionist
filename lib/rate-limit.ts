@@ -1,4 +1,3 @@
-import type { NextRequest } from "next/server";
 import { getSupabaseServerClient } from "./supabase";
 
 // Postgres-backed rate limiting.
@@ -11,16 +10,25 @@ import { getSupabaseServerClient } from "./supabase";
 // instances, so each would keep its own count and the limit would be
 // effectively N times higher than configured.
 
+/**
+ * Takes anything with a `headers` bag — a NextRequest in a route handler, or
+ * the `await headers()` result inside a Server Action, which has no request
+ * object to hand around.
+ */
+type HasHeaders = { headers: { get(name: string): string | null } };
+
 export async function rateLimit(
-  req: NextRequest,
+  source: HasHeaders | Headers,
   opts: { key: string; max: number; windowMinutes: number }
 ): Promise<{ ok: boolean; remaining: number }> {
+  const h = source instanceof Headers ? source : source.headers;
+
   // On Vercel, x-forwarded-for is set by the platform and its first entry is
   // the real client. Locally it's absent, so fall back to a constant — which
   // makes dev share one bucket, and that's fine.
   const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
+    h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    h.get("x-real-ip") ||
     "local";
 
   try {

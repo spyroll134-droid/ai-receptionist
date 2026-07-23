@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
-import { notifyTrialSignup } from "@/lib/notify";
+import { confirmTrialSignup, notifyTrialSignup } from "@/lib/notify";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
@@ -34,16 +34,43 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // E-SIGN/UETA wants an affirmative act we can later evidence. The form
+  // can't submit without the box, so a request missing it didn't come from
+  // the form.
+  if (!body.tosAccepted) {
+    return NextResponse.json(
+      { error: "Terms must be accepted" },
+      { status: 400 }
+    );
+  }
+  const assentIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    null;
+
   try {
     const supabase = getSupabaseServerClient();
-    const { error } = await supabase.from("trial_signups").insert({
+    const row = {
       company_name: companyName,
       contact_name: contactName,
       phone,
       email: email || null,
       trade: trade || null,
       source: "landing_page",
-    });
+      tos_accepted_at: new Date().toISOString(),
+      tos_accept_ip: assentIp,
+    };
+    let { error } = await supabase.from("trial_signups").insert(row);
+    if (error && /tos_accept/.test(error.message)) {
+      // Migration not run yet (signups.sql). A lead lost over a missing
+      // audit column is the exact failure this product sells against —
+      // save the lead, log the gap loudly.
+      console.error("tos columns missing — run supabase/signups.sql:", error.message);
+      const { tos_accepted_at, tos_accept_ip, ...legacy } = row;
+      void tos_accepted_at;
+      void tos_accept_ip;
+      ({ error } = await supabase.from("trial_signups").insert(legacy));
+    }
     if (error) {
       console.error("Supabase insert failed:", error.message);
       return NextResponse.json({ error: "Save failed" }, { status: 500 });
@@ -69,6 +96,17 @@ export async function POST(req: NextRequest) {
       await notifyTrialSignup({ companyName, contactName, phone, email, trade });
     } catch (err) {
       console.error("Trial signup notification failed:", err);
+    }
+
+    // Confirm to the prospect too — separately, so a failure here can never
+    // stop the alert that actually drives revenue. Only when they gave an
+    // email; the field is optional and phone is the primary contact.
+    if (email) {
+      try {
+        await confirmTrialSignup({ contactName, companyName, toEmail: email });
+      } catch (err) {
+        console.error("Trial signup confirmation failed:", err);
+      }
     }
   });
 

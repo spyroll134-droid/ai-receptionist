@@ -2,7 +2,16 @@
 // lib/vapi-config.ts, so the config lives in git instead of being
 // hand-edited in a dashboard.
 //
-// Usage: VAPI_API_KEY=... npx tsx scripts/sync-vapi-assistant.ts
+// Usage: VAPI_API_KEY=... npm run sync-vapi
+//
+// The --conditions=react-server flag in that npm script is load-bearing, not
+// decoration. vapi-config imports lib/owner-config, which is marked
+// `server-only` so a client component can't leak the owner's cell into the
+// browser bundle. The server-only package throws on import unless the
+// react-server export condition is set — Next sets it automatically, plain
+// tsx does not. Running `npx tsx scripts/sync-vapi-assistant.ts` bare fails
+// with "This module cannot be imported from a Client Component module."
+// That is the guard working, not a broken script.
 //
 // Prints the assistant id and phone number id — save those into
 // .env.local / your notes, they're needed for the next steps.

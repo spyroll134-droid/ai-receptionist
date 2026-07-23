@@ -15,7 +15,8 @@ const BUTTON_BASE =
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   // Accent is reserved for the single most important action on a view.
-  primary: "bg-accent text-white hover:bg-accent-hover active:bg-accent-press",
+  primary:
+    "bg-accent-button text-accent-contrast hover:bg-accent-button-hover active:bg-accent-button-press",
   secondary:
     "border border-line-strong text-content-primary hover:bg-surface-overlay hover:border-line-strong",
   ghost: "text-content-secondary hover:text-content-primary hover:bg-surface-raised",

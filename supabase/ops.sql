@@ -48,6 +48,31 @@ begin
 end;
 $$;
 
+-- Lock it to the service role. Same reasoning as prune_rate_limits() below,
+-- but a sharper attack, because BOTH arguments are caller-supplied.
+--
+-- Exposed to `anon` (the PostgREST default for a function PUBLIC can execute)
+-- this is a remote lockout primitive, not just a nuisance. Anyone could POST
+-- to /rest/v1/rpc/rate_limit_hit with p_bucket='sign-in' and p_identifier set
+-- to a paying client's IP, eleven times, and that client can no longer sign in
+-- to their own portal for an hour — with no failed-login trail anywhere,
+-- because no login was ever attempted. The same trick against 'trial-signup'
+-- blocks a prospect from converting.
+--
+-- It is also an unauthenticated INSERT loop into rate_limits: rows are only
+-- pruned after two days, so the table is writable storage for anyone who finds
+-- the endpoint.
+--
+-- Safe to revoke because every caller goes through lib/rate-limit.ts, which
+-- uses the service-role client (lib/supabase.ts). No anon or authenticated
+-- session ever calls this legitimately. RLS on the table does not help here —
+-- security definer runs as the owner and bypasses it, which is the whole point
+-- of the function.
+revoke execute on function rate_limit_hit(text, text, int) from public;
+revoke execute on function rate_limit_hit(text, text, int) from anon;
+revoke execute on function rate_limit_hit(text, text, int) from authenticated;
+grant execute on function rate_limit_hit(text, text, int) to service_role;
+
 alter table rate_limits enable row level security;
 -- No policies: only the service role (API routes) touches this. RLS on with
 -- zero policies means clients get nothing, which is what we want.
@@ -83,3 +108,21 @@ set search_path = public
 as $$
   delete from rate_limits where created_at < now() - interval '2 days';
 $$;
+
+-- Lock it to the service role.
+--
+-- Postgres grants EXECUTE on new functions to PUBLIC by default, and PostgREST
+-- exposes anything the `anon` role can execute as an RPC — so this was callable
+-- unauthenticated at /rest/v1/rpc/prune_rate_limits. It is security definer,
+-- so it ran regardless of RLS. Truncating this table is not destructive to
+-- customer data, but it silently resets the ONLY rate limit in the system
+-- (/api/trial-signup), which is exactly what someone would call it for.
+--
+-- Deliberately a grant change rather than an `admins` check inside the body:
+-- the sole legitimate caller is the nightly health cron going through the
+-- service-role client, where auth.uid() is null — an admins check would reject
+-- the one caller that is supposed to work and let nothing else through either.
+revoke execute on function prune_rate_limits() from public;
+revoke execute on function prune_rate_limits() from anon;
+revoke execute on function prune_rate_limits() from authenticated;
+grant execute on function prune_rate_limits() to service_role;

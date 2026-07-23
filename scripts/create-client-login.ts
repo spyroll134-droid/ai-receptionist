@@ -17,6 +17,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
+import { site } from "../lib/site-config";
 
 const [, , clientName, email, tradeArg] = process.argv;
 
@@ -36,9 +37,12 @@ if (!url || !serviceKey) {
 }
 
 const trade = tradeArg ?? "Restoration";
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  "https://ai-receptionist-eight-umber.vercel.app";
+// Same fix as scripts/onboard-client.ts: the old hardcoded fallback pointed the
+// password-setup link and the sign-in URL at a stale preview deployment
+// whenever NEXT_PUBLIC_SITE_URL was absent from the shell — i.e. handed a dead
+// link to a client in the first five minutes of the relationship. The live
+// domain in site-config is the single source of truth.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? site.deployedUrl;
 
 const db = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },

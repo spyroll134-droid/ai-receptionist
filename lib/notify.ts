@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { site } from "./site-config";
+import { owner } from "./owner-config";
 
 // All outbound email in one place. Previously the Vapi webhook had its own
 // inline Resend call and the trial-signup route had none at all — which meant
@@ -11,14 +12,11 @@ export function escapeHtml(s: string) {
   );
 }
 
-/** (313) 555-0134 — E.164 is unreadable at a glance and not tappable. */
-export function prettyPhone(raw?: string | null) {
-  if (!raw) return null;
-  const d = raw.replace(/\D/g, "");
-  const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
-  if (ten.length !== 10) return raw;
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
-}
+// Moved to lib/phone.ts so the dashboard can format numbers without importing
+// the Resend SDK. Imported (not just re-exported) because the templates below
+// call it directly; re-exported because the webhook imports it from here.
+import { prettyPhone } from "./phone";
+export { prettyPhone };
 
 /**
  * Send mail from the verified domain.
@@ -85,7 +83,7 @@ export async function notifyTrialSignup(s: {
   const phone = prettyPhone(s.phone) ?? s.phone;
 
   return sendEmail({
-    to: site.ownerEmail,
+    to: owner.email,
     replyTo: s.email || undefined,
     subject: `🔥 Trial signup — ${s.companyName} — ${phone}`,
     text: [
@@ -109,6 +107,63 @@ export async function notifyTrialSignup(s: {
   <div style="margin-top:28px;border-top:1px solid #eee;padding-top:14px;font-size:12px;color:#888">
     From the ${escapeHtml(site.businessName)} landing page.
   </div>
+</div>`.trim(),
+  });
+}
+
+/**
+ * Confirmation to the PROSPECT who filled in the trial form.
+ *
+ * Previously they submitted, saw a success message, and heard nothing until
+ * Jordan happened to call — a silent gap on the exact promise the product is
+ * sold on. Worse, this business's whole pitch is "you get an email the moment
+ * a lead comes in", so the signup confirmation is the first live proof of it.
+ * It has to arrive instantly and look right.
+ *
+ * It also hands them the demo number, so the wait for a callback is spent
+ * talking to the product instead of cooling off.
+ */
+export async function confirmTrialSignup(s: {
+  contactName: string;
+  companyName: string;
+  toEmail: string;
+}) {
+  const first = s.contactName.trim().split(/\s+/)[0] || "there";
+
+  return sendEmail({
+    to: s.toEmail,
+    replyTo: owner.email,
+    subject: `Got it — setting up ${s.companyName}`,
+    text: [
+      `${first} — got your request. I'll call you within one business day to get set up.`,
+      "",
+      "Setup takes about twenty minutes and it's all on my end. Your number",
+      "doesn't change and nothing on your trucks or website changes.",
+      "",
+      `While you wait, call the line yourself: ${site.demoPhoneDisplay}`,
+      "Act like a customer for your issue — that's exactly what your callers hear.",
+      "",
+      "— Jordan",
+      site.businessName,
+    ].join("\n"),
+    html: `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
+  <div style="font-size:20px;font-weight:700">${escapeHtml(first)} — got your request.</div>
+  <p style="margin-top:12px;font-size:15px;line-height:1.6;color:#333">
+    I'll call you within one business day to get ${escapeHtml(s.companyName)} set up.
+    It takes about twenty minutes and it's all on my end — your number doesn't
+    change, and nothing on your trucks or website changes.
+  </p>
+  <div style="margin-top:24px;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center">
+    <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#666">Try it before we talk</div>
+    <a href="${escapeHtml(site.demoPhoneHref)}" style="display:block;margin-top:8px;font-size:22px;font-weight:700;color:#1d4ed8;text-decoration:none">${escapeHtml(site.demoPhoneDisplay)}</a>
+    <div style="margin-top:8px;font-size:13px;color:#666">
+      Act like a customer for your issue — that's what your callers hear.
+    </div>
+  </div>
+  <p style="margin-top:24px;font-size:15px;color:#333">— Jordan<br>
+    <span style="color:#888;font-size:13px">${escapeHtml(site.businessName)}</span>
+  </p>
 </div>`.trim(),
   });
 }

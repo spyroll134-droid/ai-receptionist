@@ -1,193 +1,269 @@
 import Link from "next/link";
 import { requestNow } from "@/lib/now";
-import { getSupabaseServerClient } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase-auth";
+import { ActivityBars } from "@/components/dash";
+import { clientHealth, loadOps, summarize } from "@/lib/ops";
 import { site } from "@/lib/site-config";
 import {
-  ActivityBars,
-  Badge,
-  CallCard,
-  type CallRow,
-  isAfterHours,
-  isDeadAir,
-  Shell,
-  StatTile,
-} from "@/components/dash";
+  CallRowLine,
+  Empty,
+  NotAuthorized,
+  OpsShell,
+  Panel,
+  StatStrip,
+  Table,
+  Td,
+  Th,
+} from "@/components/ops";
 
-// Internal ops dashboard (owner view): all clients, all calls, all trial
-// signups. Gated by requireAdmin() — a real Supabase auth session checked
-// against the admins table (supabase/ops.sql). Client-facing views live at
-// /portal behind their own sessions, scoped to one client each by RLS.
+// Overview: the "is anything on fire" view. Everything here is a summary that
+// links into a filtered Calls view rather than a place to do work — drilling
+// down is one click and the URL carries the filter.
 
 export const dynamic = "force-dynamic";
 
-type ClientRow = {
-  id: string;
-  name: string;
-  trade: string;
-  created_at: string;
-};
+export default async function Overview() {
+  if (!(await requireAdmin())) return <NotAuthorized />;
 
-type SignupRow = {
-  id: string;
-  created_at: string;
-  company_name: string;
-  contact_name: string;
-  phone: string;
-  email: string | null;
-  trade: string | null;
-};
-
-function fmtShort(ts: string) {
-  return new Date(ts).toLocaleString("en-US", {
-    timeZone: "America/Detroit",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-export default async function Dashboard() {
-  // Was gated by ?key=<secret> in the URL — the same weakness the client
-  // portals had: the credential lands in browser history, in anything you
-  // screenshot, and in Vercel's access logs in plaintext. Admins are now real
-  // auth users (supabase/ops.sql), checked against the admins table.
-  const isAdmin = await requireAdmin();
-  if (!isAdmin) {
-    return (
-      <Shell title="Not authorized" subtitle="">
-        <p className="mt-16 text-center text-sm text-content-tertiary">
-          Sign in with an admin account to view this.
-        </p>
-        <p className="mt-3 text-center">
-          <Link
-            href="/login"
-            className="text-sm font-medium text-accent-text hover:text-content-primary"
-          >
-            Go to sign in →
-          </Link>
-        </p>
-      </Shell>
-    );
-  }
-
-  const supabase = getSupabaseServerClient();
-  // Per-request clock read. connection() marks this render as dynamic so
-  // the value is never captured at build time; the result is threaded into
-  // children so server and client agree and hydration stays clean.
   const nowMs = await requestNow();
-  const [{ data: calls }, { data: signups }, { data: clients }] = await Promise.all([
-    supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(100),
-    supabase.from("trial_signups").select("*").order("created_at", { ascending: false }).limit(50),
-    supabase.from("clients").select("*").order("created_at", { ascending: true }),
-  ]);
-
-  const callRows = (calls ?? []) as CallRow[];
-  const signupRows = (signups ?? []) as SignupRow[];
-  const clientRows = (clients ?? []) as ClientRow[];
-  const clientName = new Map(clientRows.map((c) => [c.id, c.name]));
-
-  const connected = callRows.filter((c) => !isDeadAir(c));
-  const deadAir = callRows.length - connected.length;
-  const emergencies = connected.filter((c) => c.emergency).length;
-  const booked = connected.filter((c) => c.booked).length;
-  const afterHours = connected.filter((c) => isAfterHours(c.created_at)).length;
+  const { calls, signups, clients } = await loadOps({ callLimit: 200 });
+  const s = summarize(calls, nowMs);
+  const clientName = new Map(clients.map((c) => [c.id, c.name]));
+  const health = clientHealth(calls, clients, nowMs, site.pricing.monthly);
+  const recent = calls.slice(0, 8);
 
   return (
-    <Shell title={`${site.businessName} — Operations`} subtitle="All clients · live from the database">
-      <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatTile
-          label="Calls answered"
-          value={connected.length}
-          sub={deadAir > 0 ? `+${deadAir} dead-air excluded` : undefined}
-        />
-        <StatTile label="Emergencies" value={emergencies} accent="red" />
-        <StatTile label="Jobs booked" value={booked} accent="green" />
-        <StatTile label="After-hours saves" value={afterHours} />
-        <StatTile label="Trial signups" value={signupRows.length} />
-      </section>
+    <OpsShell
+      badge="Internal"
+      active="/dashboard"
+      title="Overview"
+      counts={{
+        "/dashboard/calls": calls.length,
+        "/dashboard/clients": clients.length,
+        "/dashboard/signups": signups.length,
+      }}
+      actions={
+        <span className="text-2xs text-content-faint">live from the database</span>
+      }
+    >
+      <StatStrip
+        items={[
+          {
+            label: "Needs follow-up",
+            value: s.unhandled,
+            tone: s.unhandled > 0 ? "critical" : undefined,
+            glyph: s.unhandled > 0 ? "▲" : undefined,
+            sub: s.unhandled > 0 ? "emergencies with no human" : "all clear",
+            href: "/dashboard/calls?status=unhandled&range=all",
+          },
+          {
+            label: "Calls answered",
+            value: s.connected.length,
+            sub: s.deadAir > 0 ? `${s.deadAir} dead-air excluded` : undefined,
+          },
+          { label: "Emergencies", value: s.emergencies, tone: "critical", glyph: "▲" },
+          // Booked and won are separate numbers on purpose. Booked is what the
+          // AI delivered; won is what the client confirmed became money. The
+          // gap between them is the single best read on whether clients are
+          // actually dispositioning their leads — if won stays at zero while
+          // booked climbs, every client dashboard is showing a soft number and
+          // the renewal conversation has nothing to stand on.
+          { label: "Jobs booked", value: s.booked, sub: "AI put on the books" },
+          {
+            label: "Jobs won",
+            value: s.won,
+            tone: "positive",
+            glyph: "✓",
+            sub: "confirmed by the client",
+          },
+          { label: "Trial signups", value: signups.length },
+        ]}
+      />
 
-      <section className="mt-6">
-        <ActivityBars calls={connected} nowMs={nowMs} />
-      </section>
-
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold text-white">Clients</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {clientRows.map((c) => {
-            const n = callRows.filter((r) => r.client_id === c.id).length;
-            return (
-              <div key={c.id} className="rounded-2xl border border-line-default bg-surface-raised p-4">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-white">{c.name}</span>
-                  <Badge tone="info">{c.trade}</Badge>
-                </div>
-                {/* No portal link: /portal/<access_key> was removed with the
-                    URL-key scheme — clients now sign in at /login and see
-                    only their own rows via RLS. */}
-                <div className="mt-2 text-sm text-content-tertiary">{n} calls logged</div>
-              </div>
-            );
-          })}
+      {/* The notification bug surfaced as a first-class alert: a call the
+          owner was never emailed about is a missed job, and it was only
+          discoverable by reading the database before. */}
+      {s.unnotified > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-critical-line bg-critical-surface px-4 py-2.5 text-sm">
+          <span aria-hidden className="text-critical-text">
+            ▲
+          </span>
+          <span className="text-content-primary">
+            <strong className="font-semibold tabular-nums">{s.unnotified}</strong>{" "}
+            {s.unnotified === 1 ? "call" : "calls"} never triggered an owner
+            notification email.
+          </span>
+          <Link
+            href="/dashboard/calls?status=unnotified&range=all"
+            className="text-critical-text underline-offset-2 hover:underline"
+          >
+            Review
+          </Link>
         </div>
-      </section>
+      )}
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold text-white">Calls</h2>
-        {callRows.length === 0 ? (
-          <p className="mt-4 text-sm text-content-tertiary">
-            No calls yet — call the demo line and it lands here automatically.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {callRows.map((c) => (
-              <div key={c.id}>
-                {clientRows.length > 1 && (
-                  <div className="mb-1 pl-1 text-xs text-content-secondary">
-                    {clientName.get(c.client_id ?? "") ?? "Unassigned"}
-                  </div>
-                )}
-                <CallCard c={c} />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <div className="mt-4">
+        <ActivityBars calls={s.connected} nowMs={nowMs} />
+      </div>
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold text-white">Trial signups</h2>
-        {signupRows.length === 0 ? (
-          <p className="mt-4 text-sm text-content-tertiary">
-            Website form submissions land here.
-          </p>
-        ) : (
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-line-default bg-surface-raised">
-            <table className="w-full text-left text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+      <div className="mt-4">
+        <Panel
+          title="Recent calls"
+          action={
+            <Link
+              href="/dashboard/calls"
+              className="text-xs text-content-tertiary transition-colors hover:text-content-primary"
+            >
+              View all →
+            </Link>
+          }
+        >
+          {recent.length === 0 ? (
+            <Empty>No calls yet — call the demo line and it lands here.</Empty>
+          ) : (
+            <Table>
               <thead>
-                <tr className="border-b border-line-default text-xs uppercase tracking-wide text-content-tertiary">
-                  <th className="px-4 py-3 font-medium">When</th>
-                  <th className="px-4 py-3 font-medium">Company</th>
-                  <th className="px-4 py-3 font-medium">Contact</th>
-                  <th className="px-4 py-3 font-medium">Phone</th>
-                  <th className="px-4 py-3 font-medium">Trade</th>
+                <tr>
+                  <Th className="w-0" />
+                  <Th>Time</Th>
+                  <Th>Caller</Th>
+                  <Th>Callback</Th>
+                  <Th>Caller ID</Th>
+                  {clients.length > 1 && <Th>Client</Th>}
+                  <Th>Status</Th>
                 </tr>
               </thead>
               <tbody>
-                {signupRows.map((s) => (
-                  <tr key={s.id} className="border-b border-line-subtle last:border-0">
-                    <td className="px-4 py-3 text-content-tertiary">{fmtShort(s.created_at)}</td>
-                    <td className="px-4 py-3 font-medium text-white">{s.company_name}</td>
-                    <td className="px-4 py-3">{s.contact_name}</td>
-                    <td className="px-4 py-3">{s.phone}</td>
-                    <td className="px-4 py-3">{s.trade ?? "—"}</td>
+                {recent.map((c) => (
+                  <CallRowLine
+                    key={c.id}
+                    c={c}
+                    clientName={
+                      clients.length > 1
+                        ? (clientName.get(c.client_id ?? "") ?? "")
+                        : undefined
+                    }
+                    href={`/dashboard/calls?call=${c.id}`}
+                  />
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Panel>
+      </div>
+
+      {/* Client health, not a client list. Sorted quietest-first: the account
+          at the top is the one closest to churning. Margin is subscription
+          minus Vapi spend — it has been recorded on every call since the
+          webhook was written and was never once displayed. */}
+      <div className="mt-4">
+        <Panel
+          title="Client health"
+          action={
+            <span className="text-2xs text-content-faint">
+              trailing 30 days · quietest first
+            </span>
+          }
+        >
+          {health.length === 0 ? (
+            <Empty>No clients provisioned yet.</Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Name</Th>
+                  <Th>Trade</Th>
+                  <Th className="text-right">Calls</Th>
+                  <Th className="text-right">Emerg.</Th>
+                  <Th className="text-right">Booked</Th>
+                  <Th className="text-right">Won</Th>
+                  <Th className="text-right">Spend</Th>
+                  <Th className="text-right">Margin</Th>
+                  <Th className="text-right">Last call</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {health.map((h) => (
+                  <tr
+                    key={h.client.id}
+                    className="border-b border-line-subtle last:border-0 hover:bg-surface-raised"
+                  >
+                    <Td className="font-medium text-content-primary">
+                      <Link
+                        href={`/dashboard/calls?client=${h.client.id}&range=30`}
+                        className="transition-colors hover:text-accent-text"
+                      >
+                        {h.client.name}
+                      </Link>
+                    </Td>
+                    <Td className="text-content-secondary">{h.client.trade}</Td>
+                    <Td className="text-right tabular-nums text-content-secondary">
+                      {h.calls30}
+                    </Td>
+                    <Td className="text-right tabular-nums text-content-secondary">
+                      {h.emergencies30}
+                    </Td>
+                    <Td className="text-right tabular-nums text-content-secondary">
+                      {h.booked30}
+                    </Td>
+                    {/* A client with bookings but no wons isn't closing them
+                        out — their own dashboard is showing them nothing, which
+                        is a churn signal well before the calls stop. Marked
+                        with ◷ + muted, not red: it's a nudge, not a fault. */}
+                    <Td className="text-right tabular-nums">
+                      {h.won30 > 0 ? (
+                        <span className="text-positive-text">
+                          <span aria-hidden="true">✓ </span>
+                          {h.won30}
+                        </span>
+                      ) : h.booked30 > 0 ? (
+                        <span className="text-caution-text">
+                          <span aria-hidden="true">◷ </span>0
+                        </span>
+                      ) : (
+                        <span className="text-content-faint">0</span>
+                      )}
+                    </Td>
+                    <Td className="text-right tabular-nums text-content-secondary">
+                      ${h.cost30.toFixed(2)}
+                    </Td>
+                    {/* A negative margin is impossible at current call volume,
+                        but it is the number that decides whether $297 is the
+                        right price, so it is shown with a sign rather than
+                        assumed positive. */}
+                    <Td
+                      className={`text-right tabular-nums ${
+                        h.margin30 < 0 ? "text-critical-text" : "text-content-secondary"
+                      }`}
+                    >
+                      {/* ▼ glyph, not colour alone — same churn signal as the
+                          clients page, so the two admin tables agree. */}
+                      {h.margin30 < 0 && <span aria-hidden="true">▼ </span>}
+                      {h.margin30 < 0 ? "−" : ""}${Math.abs(h.margin30).toFixed(2)}
+                    </Td>
+                    <Td className="whitespace-nowrap text-right text-content-tertiary">
+                      {h.daysSinceLastCall == null ? (
+                        <span className="text-content-faint">never</span>
+                      ) : h.daysSinceLastCall === 0 ? (
+                        "today"
+                      ) : h.daysSinceLastCall >= 4 ? (
+                        // Stale account (≥4 days): the clients-page threshold,
+                        // red + ▲ so a going-quiet client reads the same here.
+                        <span className="text-critical-text">
+                          <span aria-hidden="true">▲ </span>
+                          {h.daysSinceLastCall}d ago
+                        </span>
+                      ) : (
+                        `${h.daysSinceLastCall}d ago`
+                      )}
+                    </Td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </Shell>
+            </Table>
+          )}
+        </Panel>
+      </div>
+    </OpsShell>
   );
 }

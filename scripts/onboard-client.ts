@@ -48,6 +48,15 @@ const trade = arg("trade") ?? "Restoration";
 const area = arg("area");
 const greeting = arg("greeting") ?? name;
 const notes = arg("notes");
+// The E.164 of the AI line itself (the number bought in Telnyx and imported to
+// Vapi). Stored so the emergency voice alert can ring the owner FROM their own
+// business line — a caller ID they recognize — instead of the shared default.
+// Optional because the alert degrades gracefully without it.
+const number = arg("number");
+if (number && !/^\+1\d{10}$/.test(number)) {
+  console.error(`--number must be E.164 like +12485551234, got "${number}"`);
+  process.exit(1);
+}
 // Ask during the setup call: "what's your average job worth?" Owners always
 // know. Omit to fall back to the trade default (site.avgTicketByTrade).
 const avgTicketArg = arg("avg-ticket");
@@ -60,7 +69,7 @@ if (avgTicketArg && (!Number.isInteger(avgTicket) || avgTicket! < 50)) {
 if (!name || !email || !phoneNumberId || !transfer) {
   console.error(
     "Required: --name, --email, --phone-number-id, --transfer\n" +
-      "Optional: --trade --area --greeting --notes --avg-ticket"
+      "Optional: --trade --area --greeting --notes --avg-ticket --number"
   );
   process.exit(1);
 }
@@ -146,6 +155,7 @@ async function main() {
       access_key: accessKey,
       vapi_phone_number_id: phoneNumberId,
       emergency_transfer_number: transfer,
+      assigned_number: number ?? null,
       service_area: area ?? null,
       agent_notes: notes ?? null,
       avg_ticket_dollars: avgTicket,

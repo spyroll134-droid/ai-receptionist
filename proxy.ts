@@ -44,18 +44,38 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+  // Prefix matches, not equality: both surfaces have sub-pages now, and an
+  // exact list is one new tab away from being silently unprotected.
+  const isProtected =
+    pathname === "/portal" ||
+    pathname.startsWith("/portal/") ||
+    pathname === "/dashboard" ||
+    pathname.startsWith("/dashboard/");
 
-  if (!user && pathname === "/portal") {
+  if (!user && isProtected) {
     const to = request.nextUrl.clone();
     to.pathname = "/login";
+    to.search = "";
     to.searchParams.set("next", pathname);
     return NextResponse.redirect(to);
   }
 
-  // Already signed in? Skip the login form.
-  if (user && pathname === "/login") {
+  // Already signed in and landing on /login with nowhere in particular to be?
+  // Send them to whichever home is theirs. Admins were previously dumped on
+  // /portal, which is the client view — they had no path to /dashboard.
+  //
+  // The ?next= escape hatch matters: without it a signed-in user could never
+  // reach the form to sign in as someone else, and a stale session looked
+  // indistinguishable from a rejected password.
+  if (user && pathname === "/login" && !request.nextUrl.searchParams.has("next")) {
+    const { data: admin } = await supabase
+      .from("admins")
+      .select("auth_user_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
     const to = request.nextUrl.clone();
-    to.pathname = "/portal";
+    to.pathname = admin ? "/dashboard" : "/portal";
     to.search = "";
     return NextResponse.redirect(to);
   }

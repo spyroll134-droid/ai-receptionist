@@ -36,10 +36,20 @@ export default function RecentCallsFeed({
             )}
           </div>
 
-          {c.booked && (
+          {/* Money only on a job the owner confirmed closed. A booked call
+              gets the word "Scheduled" instead of a dollar figure — it's a
+              promise until he says otherwise, and putting a number on it here
+              is what would make the dashboard's total unbelievable. */}
+          {c.lead_status === "won" ? (
             <span className="whitespace-nowrap text-sm font-medium tabular-nums text-positive-text">
-              ~${avgTicket.toLocaleString()}
+              ≈ ${avgTicket.toLocaleString()}
             </span>
+          ) : (
+            c.booked && (
+              <span className="whitespace-nowrap text-2xs text-content-tertiary">
+                <span aria-hidden>◷ </span>Scheduled
+              </span>
+            )
           )}
         </li>
       ))}
