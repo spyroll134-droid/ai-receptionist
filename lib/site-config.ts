@@ -13,36 +13,17 @@ export const site = {
   // plumbing. Order here controls display order across the site.
   trades: ["Restoration", "Roofing", "Plumbing"] as const,
 
-  // Who the generic homepage speaks to. Deliberately broader than `trades`:
-  // the homepage's job is to not disqualify anyone who got the link
-  // secondhand, and naming three trades quietly turned away every electrician
-  // and HVAC company who read it. The specificity lives on the /for/<trade>
-  // pages instead, which is where targeted outreach sends people anyway.
+  // Who the homepage speaks to. Deliberately broader than `trades`, with the
+  // trade list demoted to examples.
+  //
+  // The old line concatenated `trades` into "Built for Restoration, Roofing
+  // and Plumbing companies", which read as a membership test — an electrician
+  // who got the link forwarded correctly concluded it wasn't for them, and the
+  // product handles their calls fine. Naming examples keeps the concreteness
+  // (a stranger still learns instantly what kind of business this is for)
+  // without the exclusion. One page, no per-trade variants to maintain.
   audienceLabel: "home-service contractors",
 
-  // Per-trade landing copy. This is the whole expansion strategy in one object:
-  // adding a trade is a config entry, not a page. A visitor who lands on
-  // /for/roofing never sees the word "plumbing", so growing the trade list can
-  // never change the page an existing customer was sold on — the pages are
-  // additive, not rewritten.
-  //
-  // `emergency` is the scenario the demo prompt tells them to act out. It has
-  // to be THEIR emergency: telling a roofer to say "burst pipe" proves the
-  // line answers, but not that it understands roofing. `slug` is the URL.
-  tradePages: {
-    restoration: {
-      trade: "Restoration",
-      emergency: "standing water in the basement from a burst pipe",
-    },
-    roofing: {
-      trade: "Roofing",
-      emergency: "water coming through the ceiling in the middle of a storm",
-    },
-    plumbing: {
-      trade: "Plumbing",
-      emergency: "sewage backing up into the downstairs shower",
-    },
-  } as const,
 
   // Live demo line (Telnyx number routed to the Vapi assistant).
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.

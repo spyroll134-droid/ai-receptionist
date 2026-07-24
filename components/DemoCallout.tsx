@@ -1,17 +1,12 @@
 import { site } from "@/lib/site-config";
 
-// Same trade-awareness as the hero: the scenario has to be the one THEY get
-// called about at 2am, or the demo proves the line answers without proving it
-// understands their work.
+// The burst-pipe scenario is the demo script for everyone, not because every
+// caller is a restoration company but because it's the emergency a stranger can
+// act out convincingly without knowing the trade. What it proves is the thing
+// under test: the line picks up, qualifies, and hands over a real lead.
 
-export default function DemoCallout({
-  trade,
-}: {
-  trade?: keyof typeof site.tradePages;
-}) {
-  const emergency = trade
-    ? site.tradePages[trade].emergency
-    : "standing water in the basement from a burst pipe";
+export default function DemoCallout() {
+  const emergency = "standing water in the basement from a burst pipe";
 
   return (
     <section className="bg-blue-600">

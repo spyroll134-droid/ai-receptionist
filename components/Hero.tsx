@@ -1,13 +1,11 @@
-import { site } from "@/lib/site-config";
+import { site, tradesLabel } from "@/lib/site-config";
 
-// The hero, in two modes. Without a `trade` it speaks to every trade we sell to
-// today; with one it speaks to exactly that trade and never names the others.
-//
-// That split is what makes expansion safe. Adding a fourth trade adds a page,
-// it doesn't edit the page the first three customers were sold on — so nobody
-// watches the pitch they bought get diluted. Specificity is also the only edge
-// available before there's a brand: "built for roofing companies" reads as
-// competence in a way "built for home service" never can.
+// One hero for everyone. The trade list appears as EXAMPLES, not as a
+// membership test — "built for home-service contractors — roofing, plumbing,
+// restoration and more" tells a stranger instantly what kind of business this
+// is for without telling an electrician to leave. The product handles their
+// calls fine and avgTicketFor already falls back for unrecognised trades, so
+// the page had no reason to be narrower than the thing it sells.
 //
 // The primary action is the phone number, not a form, and that is deliberate.
 // The objection is always "will it sound like a robot in front of my
@@ -15,9 +13,7 @@ import { site } from "@/lib/site-config";
 // does. It also self-qualifies: someone who calls, plays along, and still wants
 // to talk is worth ten form-fills.
 
-export default function Hero({ trade }: { trade?: keyof typeof site.tradePages }) {
-  const page = trade ? site.tradePages[trade] : null;
-
+export default function Hero() {
   return (
     <section className="relative overflow-hidden bg-slate-950 text-white">
       <div
@@ -30,9 +26,7 @@ export default function Hero({ trade }: { trade?: keyof typeof site.tradePages }
       />
       <div className="relative mx-auto max-w-4xl px-6 py-24 sm:py-32 text-center">
         <p className="text-sm font-medium text-blue-300 uppercase tracking-wide">
-          {page
-            ? `Built for ${page.trade.toLowerCase()} companies`
-            : `Built for ${site.audienceLabel}`}
+          Built for {site.audienceLabel}
         </p>
         <h1 className="mt-4 text-4xl sm:text-6xl font-semibold tracking-tight text-balance">
           Your team already answers most calls.{" "}
@@ -64,10 +58,12 @@ export default function Hero({ trade }: { trade?: keyof typeof site.tradePages }
             Start your {site.pricing.trialDays}-day trial
           </a>
         </div>
+        <p className="mt-4 text-sm text-slate-400">
+          {tradesLabel()} and every other trade that gets called at 2am.
+        </p>
         <p className="mt-6 text-sm text-slate-400">
-          Tell it you&apos;ve got{" "}
-          {page ? page.emergency : "a flooded basement"} — hear exactly what
-          your customers would.
+          Tell it you&apos;ve got a flooded basement — hear exactly what your
+          customers would.
         </p>
       </div>
     </section>
