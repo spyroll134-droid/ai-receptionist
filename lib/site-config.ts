@@ -13,17 +13,6 @@ export const site = {
   // plumbing. Order here controls display order across the site.
   trades: ["Restoration", "Roofing", "Plumbing"] as const,
 
-  // Who the homepage speaks to. Deliberately broader than `trades`, with the
-  // trade list demoted to examples.
-  //
-  // The old line concatenated `trades` into "Built for Restoration, Roofing
-  // and Plumbing companies", which read as a membership test — an electrician
-  // who got the link forwarded correctly concluded it wasn't for them, and the
-  // product handles their calls fine. Naming examples keeps the concreteness
-  // (a stranger still learns instantly what kind of business this is for)
-  // without the exclusion. One page, no per-trade variants to maintain.
-  audienceLabel: "home-service contractors",
-
 
   // Live demo line (Telnyx number routed to the Vapi assistant).
   // TODO: swap for a 313 Detroit-area number before heavy cold-calling.

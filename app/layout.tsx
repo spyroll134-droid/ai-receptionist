@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { site } from "@/lib/site-config";
+import { site, tradesLabel } from "@/lib/site-config";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: `${site.businessName} — AI Receptionist for ${site.audienceLabel}`,
+  title: `${site.businessName} — AI Receptionist for ${tradesLabel()}`,
   description:
     "Never miss another after-hours emergency call. AI answers what your team can't, captures the job details, and emails you the full lead before the caller hangs up.",
 };

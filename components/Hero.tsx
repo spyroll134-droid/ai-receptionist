@@ -1,11 +1,12 @@
 import { site, tradesLabel } from "@/lib/site-config";
 
-// One hero for everyone. The trade list appears as EXAMPLES, not as a
-// membership test — "built for home-service contractors — roofing, plumbing,
-// restoration and more" tells a stranger instantly what kind of business this
-// is for without telling an electrician to leave. The product handles their
-// calls fine and avgTicketFor already falls back for unrecognised trades, so
-// the page had no reason to be narrower than the thing it sells.
+// The eyebrow names the three trades on purpose. They are the ones being sold
+// to, and they are the ones where the pitch survives contact with the numbers:
+// roofing averages $9k a job and restoration $6k, so a single saved job pays
+// for years of service. Specificity is also the only edge available before
+// there's a brand — "built for roofing companies" reads as competence in a way
+// "built for home service" never can. The product handles other trades fine if
+// one walks in; the page just isn't aimed at them.
 //
 // The primary action is the phone number, not a form, and that is deliberate.
 // The objection is always "will it sound like a robot in front of my
@@ -26,7 +27,7 @@ export default function Hero() {
       />
       <div className="relative mx-auto max-w-4xl px-6 py-24 sm:py-32 text-center">
         <p className="text-sm font-medium text-blue-300 uppercase tracking-wide">
-          Built for {site.audienceLabel}
+          Built for {tradesLabel()} companies
         </p>
         <h1 className="mt-4 text-4xl sm:text-6xl font-semibold tracking-tight text-balance">
           Your team already answers most calls.{" "}
@@ -58,9 +59,6 @@ export default function Hero() {
             Start your {site.pricing.trialDays}-day trial
           </a>
         </div>
-        <p className="mt-4 text-sm text-slate-400">
-          {tradesLabel()} and every other trade that gets called at 2am.
-        </p>
         <p className="mt-6 text-sm text-slate-400">
           Tell it you&apos;ve got a flooded basement — hear exactly what your
           customers would.
